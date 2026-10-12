@@ -1,0 +1,29 @@
+{% load static %}<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Đăng nhập · Zalo Tool</title>
+<link rel="stylesheet" href="{% static 'guitin/app.css' %}">
+</head>
+<body>
+<main class="auth">
+  <form class="auth-card" method="post" novalidate>
+    {% csrf_token %}
+    <div class="brand"><span class="logo">Z</span>Zalo Tool</div>
+    <h1>Đăng nhập</h1>
+    {% if form.non_field_errors %}<div class="alert">{{ form.non_field_errors|join:" " }}</div>{% endif %}
+    <label class="f" for="{{ form.username.id_for_label }}">Email
+      <input type="email" name="{{ form.username.html_name }}" id="{{ form.username.id_for_label }}"
+             value="{{ form.username.value|default:'' }}" autocomplete="email" autofocus required>
+    </label>
+    <label class="f" for="{{ form.password.id_for_label }}">Mật khẩu
+      <input type="password" name="{{ form.password.html_name }}" id="{{ form.password.id_for_label }}" autocomplete="current-password" required>
+    </label>
+    <input type="hidden" name="next" value="{{ next }}">
+    <button class="btn primary big" type="submit">Đăng nhập</button>
+    <p class="hint" style="text-align:center;margin:0">Chưa có tài khoản? Nhờ quản trị viên tạo trong trang quản trị.</p>
+  </form>
+</main>
+</body>
+</html>

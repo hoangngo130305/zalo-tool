@@ -1,0 +1,277 @@
+{% extends "admin/index.html" %}
+{% block content_title %} Bảng điều khiển {% endblock %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  .zt-qr { width: 220px; height: 220px; background: #fff; padding: 8px; border-radius: 8px; border: 1px solid #dee2e6; }
+  .zt-log { height: 260px; overflow: auto; font-family: Consolas, monospace; font-size: 12px; background: #f8f9fa; border-radius: 6px; padding: 8px 10px; }
+  .zt-log .t { color: #6c757d; margin-right: 6px; }
+  .zt-log .ok { color: #1d7a4c; } .zt-log .warn { color: #9a5a00; } .zt-log .error { color: #b3261e; }
+  .zt-staff tbody tr { cursor: pointer; }
+  .zt-staff td.n, .zt-staff th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .zt-bar { height: 8px; }
+  .zt-num { font-variant-numeric: tabular-nums; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="zt" data-me="{{ me_id }}" data-zalo="{{ co_quyen_zalo|yesno:'1,' }}" data-gui="{{ co_quyen_gui|yesno:'1,' }}">
+  <div class="alert alert-danger d-none" id="ztWorker">
+    <i class="fas fa-exclamation-triangle"></i> Zalo worker chưa chạy nên chưa gửi được tin. Kiểm tra cửa sổ “Zalo worker” (mở bằng chay-web.bat) còn mở không.
+  </div>
+
+  <!-- Số liệu tổng -->
+  <div class="row">
+    <div class="col-6 col-md-3"><div class="info-box"><span class="info-box-icon bg-secondary"><i class="fas fa-address-book"></i></span>
+      <div class="info-box-content"><span class="info-box-text">Tổng số</span><span class="info-box-number zt-num" id="tTong">{{ thong_ke.tong.tong }}</span></div></div></div>
+    <div class="col-6 col-md-3"><div class="info-box"><span class="info-box-icon bg-info"><i class="fas fa-hourglass-half"></i></span>
+      <div class="info-box-content"><span class="info-box-text">Chờ gửi</span><span class="info-box-number zt-num" id="tCho">{{ thong_ke.tong.cho }}</span></div></div></div>
+    <div class="col-6 col-md-3"><div class="info-box"><span class="info-box-icon bg-success"><i class="fas fa-paper-plane"></i></span>
+      <div class="info-box-content"><span class="info-box-text">Đã gửi</span><span class="info-box-number zt-num" id="tDaGui">{{ thong_ke.tong.da_gui }}</span></div></div></div>
+    <div class="col-6 col-md-3"><div class="info-box"><span class="info-box-icon bg-danger"><i class="fas fa-times-circle"></i></span>
+      <div class="info-box-content"><span class="info-box-text">Lỗi / số sai</span><span class="info-box-number zt-num" id="tLoi">{{ thong_ke.tong.loi }}</span></div></div></div>
+  </div>
+
+  <div class="row">
+    <!-- Zalo -->
+    <div class="col-lg-4">
+      <div class="card card-outline card-primary">
+        <div class="card-header"><h3 class="card-title"><i class="fas fa-mobile-alt"></i> Zalo của tôi</h3></div>
+        <div class="card-body text-center">
+          <p class="mb-2"><span class="badge badge-secondary" id="zLoginBadge">Đang kiểm tra...</span></p>
+          <h5 id="zAccount" class="mb-3"></h5>
+          <div id="zQrBox" class="d-none mb-3">
+            <img id="zQr" class="zt-qr" alt="Mã QR đăng nhập Zalo">
+            <ol class="text-left small mt-2 mb-0">
+              <li>Mở app <b>Zalo</b> trên điện thoại.</li>
+              <li>Bấm biểu tượng <b>quét QR</b>, quét mã này.</li>
+              <li>Bấm <b>Đăng nhập</b> trên điện thoại để xác nhận.</li>
+            </ol>
+          </div>
+          {% if co_quyen_zalo %}
+          <button class="btn btn-primary d-none" id="zLogin"><i class="fas fa-qrcode"></i> Đăng nhập Zalo</button>
+          <button class="btn btn-outline-secondary d-none" id="zCancel">Huỷ</button>
+          <button class="btn btn-outline-danger btn-sm d-none" id="zLogout">Đăng xuất Zalo</button>
+          <p class="small text-muted mt-3 mb-0">Dùng khi quản trị tự gửi. Mỗi nhân viên kết nối Zalo riêng trên trang gửi tin của họ.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Gửi tin -->
+    <div class="col-lg-8">
+      <div class="card card-outline card-success">
+        <div class="card-header"><h3 class="card-title"><i class="fas fa-paper-plane"></i> Gửi tin bằng Zalo của tôi</h3></div>
+        <div class="card-body">
+          <div id="sIdle">
+            <p class="text-muted mb-3" id="sHint">Chưa có đợt gửi nào đang chạy.</p>
+            {% if co_quyen_gui %}
+            <div class="form-row align-items-end">
+              <div class="col-md-6 mb-2">
+                <label for="sScope" class="small mb-1">Gửi cho</label>
+                <select id="sScope" class="form-control">
+                  <option value="all">Tất cả số chờ gửi</option>
+                  <option value="none">Các số chưa giao cho ai</option>
+                  {% for u in nguoi_giao %}<option value="{{ u.id }}">Số của {{ u }}</option>{% endfor %}
+                </select>
+              </div>
+              <div class="col-md-6 mb-2">
+                <button class="btn btn-success btn-block" id="sStart"><i class="fas fa-play"></i> Bắt đầu gửi</button>
+              </div>
+            </div>
+            <div class="alert alert-warning d-none mb-0" id="sConfirm">
+              <div id="sConfirmText" class="mb-2"></div>
+              <button class="btn btn-success btn-sm" id="sConfirmOk">Xác nhận gửi</button>
+              <button class="btn btn-outline-secondary btn-sm" id="sConfirmNo">Huỷ</button>
+            </div>
+            {% endif %}
+          </div>
+          <div id="sRun" class="d-none">
+            <div class="d-flex justify-content-between mb-1"><span id="sNow"></span><b class="zt-num" id="sCount"></b></div>
+            <div class="progress mb-3"><div class="progress-bar progress-bar-striped progress-bar-animated bg-success" id="sBar" style="width:0"></div></div>
+            {% if co_quyen_gui %}<button class="btn btn-danger" id="sStop"><i class="fas fa-stop"></i> Dừng</button>{% endif %}
+          </div>
+          <hr>
+          <div class="zt-log" id="ztLog" aria-live="polite"></div>
+          <div class="mt-2 d-flex flex-wrap" style="gap:8px">
+            <a class="btn btn-outline-primary btn-sm" href="/api/lich-su/excel"><i class="fas fa-file-excel"></i> Xuất Excel lịch sử gửi</a>
+            <a class="btn btn-outline-secondary btn-sm" href="{% url 'admin:guitin_lichsugui_changelist' %}"><i class="fas fa-history"></i> Lịch sử gửi</a>
+            <a class="btn btn-outline-secondary btn-sm" href="{% url 'admin:guitin_caidat_changelist' %}"><i class="fas fa-sliders-h"></i> Nội dung tin & cài đặt</a>
+            <a class="btn btn-outline-secondary btn-sm" href="{% url 'admin:guitin_nguoinhan_nhap' %}"><i class="fas fa-file-import"></i> Nhập danh sách</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Theo nhân viên -->
+  <div class="card">
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-users"></i> Theo nhân viên</h3>
+      <div class="card-tools small text-muted">Bấm vào một dòng để xem danh sách số của người đó</div></div>
+    <div class="card-body p-0 table-responsive">
+      <table class="table table-hover mb-0 zt-staff">
+        <thead><tr><th>Nhân viên</th><th>Zalo</th><th class="n">Được giao</th><th class="n">Chờ gửi</th><th class="n">Đã gửi</th><th class="n">Lỗi / số sai</th><th style="width:28%">Tiến độ</th><th></th></tr></thead>
+        <tbody id="ztStaff"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{{ block.super }}
+
+{{ thong_ke|json_script:"zt-thong-ke" }}
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const root = $("zt");
+  const ME = Number(root.dataset.me), CAN_ZALO = !!root.dataset.zalo, CAN_SEND = !!root.dataset.gui;
+  const NHAN_VIEN_URL = "{% url 'admin:guitin_nguoinhan_changelist' %}";
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const csrf = () => document.cookie.split("; ").find((c) => c.startsWith("csrftoken="))?.split("=")[1] || "";
+  let st = {}, lastLog = 0, version = null;
+
+  async function api(path, body) {
+    const res = await fetch(path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": csrf() },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) location.reload();
+    if (!res.ok) throw new Error(data.error || "Có lỗi xảy ra");
+    return data;
+  }
+  function addLog(e) {
+    if (e.id) lastLog = Math.max(lastLog, e.id);
+    const box = $("ztLog");
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 30;
+    const div = document.createElement("div");
+    div.className = e.level || "";
+    div.innerHTML = `<span class="t">${esc(e.t)}</span>${esc(e.text)}`;
+    box.appendChild(div);
+    while (box.children.length > 300) box.firstChild.remove();
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  }
+  const loi = (e) => addLog({ t: new Date().toLocaleTimeString("vi-VN"), text: e.message || String(e), level: "error" });
+  const show = (id, on) => $(id) && $(id).classList.toggle("d-none", !on);
+
+  // ---------- thống kê ----------
+  function renderStats(tk) {
+    lastStats = tk;
+    $("tTong").textContent = tk.tong.tong; $("tCho").textContent = tk.tong.cho;
+    $("tDaGui").textContent = tk.tong.da_gui; $("tLoi").textContent = tk.tong.loi;
+    $("ztStaff").innerHTML = tk.nhanVien.map((g) => {
+      const pct = (x) => (g.tong ? (x / g.tong) * 100 : 0);
+      const url = NHAN_VIEN_URL + (g.id ? `?phu_trach__id__exact=${g.id}` : "?phu_trach__isnull=True");
+      const z = zalo[g.id];
+      const zCell = !g.id ? "" : !z ? '<span class="text-muted small">…</span>'
+        : z.running ? `<span class="badge badge-success">Đang gửi ${z.progress ? `${z.progress.i}/${z.progress.total}` : ""}</span><div class="small text-muted">${esc(z.account || "")}</div>`
+        : z.login === "in" ? `<span class="badge badge-primary">Đã kết nối</span><div class="small text-muted">${esc(z.account || "")}</div>`
+        : z.login === "qr" || z.login === "checking" ? '<span class="badge badge-warning">Đang kết nối</span>'
+        : '<span class="badge badge-secondary">Chưa kết nối</span>';
+      const act = !g.id || !CAN_ADMIN || !z ? ""
+        : z.running ? `<button class="btn btn-xs btn-outline-danger" data-stop="${g.id}" ${z.stopRequested ? "disabled" : ""}>${z.stopRequested ? "Đang dừng" : "Dừng"}</button>`
+        : z.login === "in" && g.id !== ME ? `<button class="btn btn-xs btn-outline-secondary" data-ngat="${g.id}">Ngắt Zalo</button>` : "";
+      return `<tr data-url="${url}" class="${g.id ? "" : "text-muted font-italic"}">
+        <td>${esc(g.ten)}</td><td>${zCell}</td><td class="n">${g.tong}</td><td class="n">${g.cho}</td><td class="n">${g.da_gui}</td><td class="n">${g.loi}</td>
+        <td><div class="progress zt-bar" title="${g.da_gui} đã gửi, ${g.loi} lỗi / ${g.tong}">
+          <div class="progress-bar bg-success" style="width:${pct(g.da_gui)}%"></div><div class="progress-bar bg-danger" style="width:${pct(g.loi)}%"></div></div></td>
+        <td class="text-right">${act}</td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="8" class="text-center text-muted py-4">Chưa có số nào. Bấm “Nhập danh sách” để thêm.</td></tr>`;
+  }
+  // Zalo của từng nhân viên (cập nhật mỗi 3 giây)
+  const CAN_ADMIN = {{ request.user.is_superuser|yesno:"true,false" }};
+  let zalo = {}, lastStats = null;
+  async function loadZalo() {
+    try {
+      const r = await api("/api/zalo/tat-ca");
+      zalo = Object.fromEntries(r.nhanVien.map((n) => [n.id, n]));
+      if (lastStats) renderStats(lastStats);
+    } catch {}
+    setTimeout(loadZalo, document.hidden ? 8000 : 3000);
+  }
+  let ngatArmed = null;
+  $("ztStaff").addEventListener("click", async (e) => {
+    const stop = e.target.dataset.stop, ngat = e.target.dataset.ngat;
+    if (stop) { e.stopPropagation(); api("/api/stop", { uid: Number(stop) }).catch(loi); return; }
+    if (ngat) {
+      e.stopPropagation();
+      if (ngatArmed !== ngat) { ngatArmed = ngat; e.target.textContent = "Bấm lần nữa"; setTimeout(() => (ngatArmed = null), 3000); return; }
+      ngatArmed = null;
+      api("/api/zalo/logout", { uid: Number(ngat) }).then(loadZalo).catch(loi);
+      return;
+    }
+    const tr = e.target.closest("tr[data-url]");
+    if (tr) location.href = tr.dataset.url;
+  });
+
+  // ---------- trạng thái Zalo & gửi ----------
+  function render() {
+    show("ztWorker", st.worker === false);
+    const badge = $("zLoginBadge");
+    const map = { in: ["badge-success", "Đã kết nối"], checking: ["badge-warning", "Đang kết nối..."], qr: ["badge-warning", "Chờ quét QR"], out: ["badge-secondary", "Chưa đăng nhập"] };
+    const [cls, text] = map[st.login] || map.out;
+    badge.className = `badge ${cls}`; badge.textContent = text;
+    $("zAccount").textContent = st.login === "in" ? st.account : "";
+    show("zQrBox", st.login === "qr" && !!st.qr);
+    if (st.qr) $("zQr").src = st.qr;
+    show("zLogin", CAN_ZALO && st.login === "out" && st.worker !== false);
+    show("zCancel", CAN_ZALO && (st.login === "qr" || st.login === "checking"));
+    show("zLogout", CAN_ZALO && st.login === "in" && !st.running);
+
+    show("sIdle", !st.running);
+    show("sRun", !!st.running);
+    if (st.running && st.progress) {
+      $("sCount").textContent = `${st.progress.i}/${st.progress.total}`;
+      $("sBar").style.width = `${(st.progress.i / st.progress.total) * 100}%`;
+      const who = st.runBy?.name || "";
+      if (st.current) $("sNow").textContent = `${who} đang gửi ${st.current}`;
+      else if (st.waitUntil) $("sNow").textContent = st.stopRequested ? "Đang dừng..." : `${who}: chờ ${Math.max(0, Math.round((st.waitUntil - Date.now()) / 1000))} giây trước người tiếp theo`;
+    }
+    if ($("sStop")) { $("sStop").disabled = !!st.stopRequested; $("sStop").textContent = st.stopRequested ? "Đang dừng..." : "Dừng"; }
+    $("sHint").textContent = st.login !== "in" ? "Bạn chưa kết nối Zalo. Kết nối ở khung “Zalo của tôi” bên trái trước khi gửi." : "Bạn chưa có đợt gửi nào đang chạy. Theo dõi nhân viên ở bảng “Theo nhân viên” bên dưới.";
+    if ($("sStart")) $("sStart").disabled = st.login !== "in";
+  }
+  setInterval(() => { if (st.running && st.waitUntil && !st.current) render(); }, 1000);
+
+  async function poll() {
+    try {
+      const r = await api(`/api/poll?log=${lastLog}`);
+      st = r;
+      render();
+      r.logs.forEach(addLog);
+      if (version !== null && r.version !== version) renderStats(await api("/api/thong-ke"));
+      version = r.version;
+    } catch {}
+    setTimeout(poll, document.hidden ? 5000 : 2000);
+  }
+
+  // ---------- nút ----------
+  const on = (id, fn) => $(id) && ($(id).onclick = fn);
+  on("zLogin", () => api("/api/zalo/login", { qr: false }).catch(loi));
+  on("zCancel", () => api("/api/zalo/login/cancel", {}).catch(loi));
+  let logoutArmed = false;
+  on("zLogout", () => {
+    if (!logoutArmed) { logoutArmed = true; $("zLogout").textContent = "Bấm lần nữa để đăng xuất"; setTimeout(() => { logoutArmed = false; $("zLogout").textContent = "Đăng xuất Zalo"; }, 3000); return; }
+    api("/api/zalo/logout", {}).catch(loi);
+  });
+  on("sStart", async () => {
+    try {
+      const sel = $("sScope");
+      const { items } = await api("/api/preview", { phamVi: sel.value });
+      if (!items.length) throw new Error("Không còn số nào chờ gửi trong phạm vi này");
+      $("sConfirmText").innerHTML = `Gửi cho <b>${items.length} người</b> (${esc(sel.options[sel.selectedIndex].text.toLowerCase())}) bằng tài khoản Zalo <b>${esc(st.account)}</b>?`;
+      show("sConfirm", true);
+    } catch (e) { loi(e); }
+  });
+  on("sConfirmNo", () => show("sConfirm", false));
+  on("sConfirmOk", () => { show("sConfirm", false); api("/api/start", { phamVi: $("sScope").value }).catch(loi); });
+  on("sStop", () => api("/api/stop", {}).catch(loi));
+
+  renderStats(JSON.parse($("zt-thong-ke").textContent));
+  loadZalo();
+  api("/api/state").then((s) => { s.logs.forEach(addLog); st = s; version = s.version; render(); }).catch(loi).finally(poll);
+})();
+</script>
+{% endblock %}

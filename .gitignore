@@ -1,0 +1,17 @@
+node_modules/
+.venv/
+__pycache__/
+web/staticfiles/
+qr.png
+qr-*.png
+
+# Có mật khẩu MySQL, khoá bí mật Django và mã worker
+config.json
+# Bản dump MySQL có thể chứa dữ liệu người dùng
+zalo_tool.sql
+# Phiên đăng nhập Zalo
+data/zalo-session.json
+data/zalo-sessions/
+# File cũ trước khi chuyển sang MySQL (có phiên đăng nhập Zalo)
+data/da-chuyen-sang-mysql/
+session.json

@@ -1,0 +1,1136 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zalo Tool</title>
+<style>
+:root {
+  --bg: #f3f5f9; --surface: #ffffff; --surface-2: #f7f9fc; --fg: #172033; --muted: #5d677b; --line: #dbe1ec;
+  --accent: #1f5fc4; --accent-fg: #ffffff; --accent-soft: #e7eefb;
+  --ok: #1d7a4c; --ok-soft: #e2f3e9; --warn: #9a5a00; --warn-soft: #fbefd9; --bad: #b3261e; --bad-soft: #fbe4e2;
+  --radius: 10px;
+  --font: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: Consolas, "Cascadia Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1420; --surface: #171e2c; --surface-2: #1c2434; --fg: #e6eaf2; --muted: #9aa4b8; --line: #2c3548;
+    --accent: #5f93f5; --accent-fg: #0b1220; --accent-soft: #1b2a47;
+    --ok: #6fd3a0; --ok-soft: #15301f; --warn: #f0b05a; --warn-soft: #33260f; --bad: #ff8a80; --bad-soft: #3a1a18;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 14px; line-height: 1.5; }
+button, input, textarea { font: inherit; color: inherit; }
+h1, h2, h3 { margin: 0; line-height: 1.3; }
+.hidden { display: none !important; }
+
+/* Thanh trên */
+.topbar { position: sticky; top: 0; z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+.topbar-inner { max-width: 1280px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.brand { font-weight: 700; font-size: 17px; display: flex; align-items: center; gap: 8px; }
+.brand .logo { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; font-weight: 800; font-size: 14px; }
+.spacer { flex: 1; }
+.acct { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.in { background: var(--ok); } .dot.wait { background: var(--warn); }
+
+/* Nút */
+.btn { border: 1px solid var(--line); background: var(--surface); padding: 7px 14px; border-radius: 8px; cursor: pointer; font-weight: 500; white-space: nowrap; }
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.btn.danger { color: var(--bad); border-color: var(--bad); background: transparent; }
+.btn.danger.solid { background: var(--bad); color: #fff; }
+.btn.sm { padding: 4px 10px; font-size: 13px; }
+.btn.link { border: 0; background: none; color: var(--accent); padding: 4px 6px; }
+.btn.big { padding: 11px 18px; font-size: 15px; }
+
+/* Bố cục */
+.wrap { max-width: 1280px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.stat .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+.stat .v { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat.ok .v { color: var(--ok); } .stat.bad .v { color: var(--bad); } .stat.todo .v { color: var(--accent); }
+.main { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(340px, 1fr); gap: 16px; align-items: start; }
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.card-h { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card-h h2 { font-size: 15px; font-weight: 700; }
+.card-h .num { font-size: 12px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 999px; width: 22px; height: 22px; display: grid; place-items: center; flex: none; }
+.card-b { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.hint { font-size: 12.5px; color: var(--muted); }
+.saved { font-size: 12px; color: var(--muted); margin-left: auto; }
+
+/* Bảng danh sách */
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.table-wrap { overflow: auto; max-height: 560px; border-top: 1px solid var(--line); }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+th { position: sticky; top: 0; background: var(--surface-2); font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; z-index: 1; }
+td.idx { color: var(--muted); font-variant-numeric: tabular-nums; width: 40px; }
+td input { width: 100%; border: 1px solid transparent; background: transparent; padding: 5px 7px; border-radius: 6px; }
+td input:hover { border-color: var(--line); }
+td input:focus { border-color: var(--accent); background: var(--surface); outline: none; }
+td input.phone { font-family: var(--mono); min-width: 120px; }
+td input.name { min-width: 120px; }
+td.act { white-space: nowrap; text-align: right; width: 1%; }
+tr.current { background: var(--accent-soft); }
+.empty { padding: 36px 16px; text-align: center; color: var(--muted); }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.pill.todo { background: var(--accent-soft); color: var(--accent); }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.bad { background: var(--bad-soft); color: var(--bad); }
+.pill.run { background: var(--accent); color: var(--accent-fg); }
+.note { display: block; font-size: 11.5px; color: var(--muted); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Form */
+label.f { display: flex; flex-direction: column; gap: 5px; font-weight: 600; font-size: 13px; }
+textarea, input[type=number] { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px 10px; width: 100%; }
+textarea { resize: vertical; min-height: 70px; line-height: 1.5; }
+textarea:focus, input[type=number]:focus { border-color: var(--accent); outline: none; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.preview { background: var(--surface-2); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; font-size: 13px; }
+.preview .lbl { display: block; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 2px; }
+.count { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: auto; }
+.count.over { color: var(--bad); font-weight: 600; }
+.switch { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500; }
+.switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+/* Bảng điều khiển gửi */
+.run-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.run-btns .btn.big { flex: 1; }
+.progress { height: 8px; background: var(--accent-soft); border-radius: 999px; overflow: hidden; }
+.progress > div { height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+.run-status { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; flex-wrap: wrap; }
+.run-status b { font-variant-numeric: tabular-nums; }
+.confirm { border: 1px solid var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.alert { border-radius: 8px; padding: 8px 12px; background: var(--bad-soft); color: var(--bad); font-size: 13px; }
+.log { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; height: 220px; overflow: auto; padding: 8px 10px; font-family: var(--mono); font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+.log .t { color: var(--muted); margin-right: 6px; }
+.log .ok { color: var(--ok); } .log .warn { color: var(--warn); } .log .error { color: var(--bad); }
+
+/* Hộp thoại */
+.modal-bg { position: fixed; inset: 0; background: rgb(10 15 25 / .55); display: grid; place-items: center; padding: 16px; z-index: 20; }
+.modal { background: var(--surface); border-radius: 14px; width: min(560px, 100%); max-height: calc(100vh - 32px); display: flex; flex-direction: column; box-shadow: 0 20px 50px rgb(0 0 0 / .25); }
+.modal .card-b { overflow: auto; }
+.modal-f { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: flex-end; }
+.qr-box { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.qr-box img { width: 240px; height: 240px; border-radius: 8px; background: #fff; padding: 8px; }
+.steps { margin: 0; padding-left: 20px; text-align: left; }
+.pv-item { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.pv-item h3 { font-size: 13px; }
+
+/* Màn hình đăng nhập */
+.auth { position: fixed; inset: 0; z-index: 30; background: var(--bg); display: grid; place-items: center; padding: 16px; overflow: auto; }
+.auth-card { width: min(400px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 28px 24px; display: flex; flex-direction: column; gap: 14px; }
+.auth-card .brand { justify-content: center; font-size: 20px; }
+.auth-card h1 { font-size: 17px; text-align: center; }
+.auth-card input, .modal input[type=text], .modal input[type=password], .modal select { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 9px 10px; width: 100%; }
+.auth-card input:focus, .modal input:focus, .modal select:focus { border-color: var(--accent); outline: none; }
+.form-err { color: var(--bad); font-size: 13px; min-height: 1em; }
+.mono { font-family: var(--mono); }
+
+/* Phân công nhân viên */
+select.sel, td select.assign { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 4px 6px; max-width: 170px; }
+td select.assign.none { color: var(--muted); border-style: dashed; }
+.owner { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.staff-table { width: 100%; }
+.staff-table td, .staff-table th { padding: 8px 14px; }
+.staff-table th.n, .staff-table td.n { text-align: right; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; }
+.staff-table tbody tr { cursor: pointer; }
+.staff-table tbody tr:hover, .staff-table tbody tr.active { background: var(--accent-soft); }
+.staff-table tr.unassigned td:first-child { color: var(--muted); font-style: italic; }
+.bar { height: 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; display: flex; }
+.bar .ok { background: var(--ok); } .bar .bad { background: var(--bad); }
+
+/* Người dùng */
+.me { display: flex; align-items: center; gap: 6px; font-size: 13px; padding-left: 12px; border-left: 1px solid var(--line); flex-wrap: wrap; }
+.role { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); text-transform: uppercase; letter-spacing: .04em; }
+.role.admin { background: var(--warn-soft); color: var(--warn); }
+.role.xem { background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
+.locked-note { font-size: 12.5px; color: var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 6px 10px; }
+.modal.wide { width: min(760px, 100%); }
+.users td { padding: 8px 10px; }
+.users select { width: auto; min-width: 120px; }
+.add-user { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 8px; align-items: end; }
+.add-user label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; min-width: 0; }
+.perm-table td, .perm-table th { padding: 5px 8px; font-size: 12.5px; text-align: center; }
+.perm-table td:first-child, .perm-table th:first-child { text-align: left; }
+
+@media (max-width: 760px) {
+  .add-user { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 960px) {
+  .main { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid2 { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .progress > div { transition: none; } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="logo">Z</span>Zalo Tool</div>
+    <div class="spacer"></div>
+    <div class="acct"><span class="dot" id="acctDot"></span><span id="acctText">Zalo: chưa đăng nhập</span></div>
+    <button class="btn primary sm" id="btnLogin">Đăng nhập Zalo</button>
+    <button class="btn sm hidden" id="btnLogout">Đăng xuất Zalo</button>
+    <div class="me">
+      <span id="meName"></span><span class="role" id="meRole"></span>
+      <button class="btn sm hidden" id="btnUsers">Quản lý tài khoản</button>
+      <button class="btn sm link" id="btnMyPass">Đổi mật khẩu</button>
+      <button class="btn sm link" id="btnSignOut">Thoát</button>
+    </div>
+  </div>
+</header>
+
+<!-- Màn hình đăng nhập Zalo Tool -->
+<div class="auth hidden" id="authScreen">
+  <form class="auth-card" id="authForm" autocomplete="on">
+    <div class="brand"><span class="logo">Z</span>Zalo Tool</div>
+    <h1 id="authTitle">Đăng nhập</h1>
+    <p class="hint hidden" id="authSetupHint">Chưa có tài khoản nào. Tạo tài khoản <b>quản trị</b> đầu tiên để bắt đầu. Sau đó bạn có thể tạo thêm tài khoản cho nhân viên.</p>
+    <label class="f hidden" id="authNameRow">Tên hiển thị<input type="text" id="authName" autocomplete="name" placeholder="Ví dụ: Hoàng"></label>
+    <label class="f">Tên đăng nhập<input type="text" id="authUser" autocomplete="username" required autocapitalize="off" spellcheck="false"></label>
+    <label class="f">Mật khẩu<input type="password" id="authPass" autocomplete="current-password" required></label>
+    <label class="f hidden" id="authPass2Row">Nhập lại mật khẩu<input type="password" id="authPass2" autocomplete="new-password"></label>
+    <div class="form-err" id="authErr"></div>
+    <button class="btn primary big" type="submit" id="authSubmit">Đăng nhập</button>
+  </form>
+</div>
+
+<main class="wrap">
+  <div class="alert hidden" id="connAlert">Mất kết nối tới tool. Kiểm tra cửa sổ đen (chay-web.bat) còn mở không.</div>
+
+  <section class="stats">
+    <div class="stat"><div class="k">Tổng danh sách</div><div class="v" id="stTotal">0</div></div>
+    <div class="stat todo"><div class="k">Chờ gửi</div><div class="v" id="stTodo">0</div></div>
+    <div class="stat ok"><div class="k">Đã gửi</div><div class="v" id="stOk">0</div></div>
+    <div class="stat bad"><div class="k">Lỗi / số sai</div><div class="v" id="stBad">0</div></div>
+  </section>
+
+  <section class="card hidden" id="staffCard">
+    <div class="card-h"><h2>Theo nhân viên</h2><span class="hint">Bấm vào một dòng để xem danh sách của người đó</span></div>
+    <div style="overflow-x:auto">
+      <table class="staff-table">
+        <thead><tr><th>Nhân viên</th><th class="n">Được giao</th><th class="n">Chờ gửi</th><th class="n">Đã gửi</th><th class="n">Lỗi / số sai</th><th style="width:40%">Tiến độ</th></tr></thead>
+        <tbody id="staffBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="main">
+    <!-- Cột trái: danh sách -->
+    <div class="col">
+      <section class="card">
+        <div class="card-h">
+          <span class="num">1</span><h2>Danh sách người nhận</h2>
+          <span class="saved" id="listSaved"></span>
+        </div>
+        <div class="card-b">
+          <div class="toolbar">
+            <button class="btn sm" id="btnAddRow">+ Thêm dòng</button>
+            <button class="btn sm" id="btnPaste">Dán danh sách</button>
+            <button class="btn sm" id="btnImport">Nhập file Excel</button>
+            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" class="hidden">
+            <div class="spacer"></div>
+            <button class="btn sm danger" id="btnClearList">Xoá hết danh sách</button>
+          </div>
+          <div class="toolbar hidden" id="scopeBar">
+            <label class="row" for="scopeSel" style="gap:6px;font-weight:600;font-size:13px">Xem
+              <select id="scopeSel" class="sel"></select>
+            </label>
+            <div class="spacer"></div>
+            <button class="btn sm hidden" id="btnAssign">Chia đều số chưa giao cho nhân viên</button>
+          </div>
+          <p class="hint" id="listHint">Số dạng 84…, +84… hoặc bị mất số 0 đầu đều được tự sửa. Số đã gửi sẽ tự bỏ qua ở lần chạy sau.</p>
+          <p class="locked-note hidden" data-lock="list">Tài khoản chỉ xem: không sửa được danh sách.</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead id="thead"></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+          <div class="empty hidden" id="emptyList">Danh sách đang trống. Bấm <b>+ Thêm dòng</b>, <b>Dán danh sách</b> hoặc <b>Nhập file Excel</b> để bắt đầu.</div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Cột phải -->
+    <div class="col">
+      <section class="card">
+        <div class="card-h"><span class="num">3</span><h2>Gửi</h2></div>
+        <div class="card-b">
+          <div class="run-btns">
+            <button class="btn" id="btnPreview">Xem trước</button>
+            <button class="btn primary big" id="btnStart">Bắt đầu gửi</button>
+            <button class="btn danger solid big hidden" id="btnStop">Dừng</button>
+          </div>
+          <div class="hint" id="runHint"></div>
+          <div class="confirm hidden" id="confirmBox">
+            <div id="confirmText"></div>
+            <div class="row">
+              <button class="btn primary sm" id="btnConfirm">Xác nhận gửi</button>
+              <button class="btn sm" id="btnCancelConfirm">Huỷ</button>
+            </div>
+          </div>
+          <div class="hidden" id="runBox">
+            <div class="run-status"><span id="runNow">Đang chuẩn bị...</span><b id="runCount">0/0</b></div>
+            <div class="progress"><div id="runBar"></div></div>
+          </div>
+          <div class="log" id="log" aria-live="polite"></div>
+          <div class="row">
+            <a class="btn sm" href="/api/report" id="btnReport">Tải báo cáo Excel</a>
+            <div class="spacer"></div>
+            <button class="btn sm link" id="btnResetAll">Xoá lịch sử gửi</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-h"><span class="num">2</span><h2>Nội dung</h2><span class="saved" id="cfgSaved"></span></div>
+        <div class="card-b">
+          <p class="locked-note hidden" data-lock="settings">Chỉ quản trị viên được sửa nội dung tin nhắn.</p>
+          <label class="f">
+            <span class="row">Lời mời kết bạn <span class="count" id="inviteCount"></span></span>
+            <textarea id="loiMoiKetBan" rows="3"></textarea>
+          </label>
+          <label class="f">
+            Tin nhắn
+            <textarea id="noiDungTinNhan" rows="7"></textarea>
+          </label>
+          <div class="row">
+            <span class="hint">Chèn <b>{ten}</b> để tự thay bằng tên từng người (trống thì thành "bạn").</span>
+          </div>
+          <div class="preview"><span class="lbl" id="pvLabel">Xem trước</span><span id="pvInvite"></span></div>
+          <div class="preview"><span class="lbl">Tin nhắn</span><span id="pvMsg"></span></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-h"><span class="num">⚙</span><h2>Cài đặt</h2></div>
+        <div class="card-b">
+          <p class="locked-note hidden" data-lock="settings">Chỉ quản trị viên được sửa cài đặt.</p>
+          <div class="row">
+            <label class="switch"><input type="checkbox" id="guiKetBan"> Gửi lời mời kết bạn</label>
+            <label class="switch"><input type="checkbox" id="guiTinNhan"> Gửi tin nhắn</label>
+          </div>
+          <label class="f">Số người tối đa mỗi lần chạy (1–50)
+            <input type="number" id="gioiHanMoiLan" min="1" max="50">
+          </label>
+          <div class="grid2">
+            <label class="f">Chờ tối thiểu (giây)
+              <input type="number" id="choToiThieuGiay" min="30">
+            </label>
+            <label class="f">Chờ tối đa (giây)
+              <input type="number" id="choToiDaGiay" min="30">
+            </label>
+          </div>
+          <p class="hint">Nên giữ 20–30 người mỗi ngày và chờ từ 60 giây trở lên để tránh bị Zalo khoá tài khoản. Tool không cho chờ dưới 30 giây.</p>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<!-- Hộp thoại đăng nhập -->
+<div class="modal-bg hidden" id="loginModal">
+  <div class="modal" role="dialog" aria-labelledby="loginTitle">
+    <div class="card-h"><h2 id="loginTitle">Đăng nhập Zalo</h2></div>
+    <div class="card-b">
+      <div class="qr-box">
+        <img id="qrImg" alt="Mã QR đăng nhập Zalo" class="hidden">
+        <div id="qrWaiting">Đang tạo mã QR...</div>
+        <ol class="steps">
+          <li>Mở app <b>Zalo</b> trên điện thoại.</li>
+          <li>Bấm biểu tượng <b>quét QR</b> ở góc trên, quét mã này.</li>
+          <li>Bấm <b>Đăng nhập</b> trên điện thoại để xác nhận.</li>
+        </ol>
+        <p class="hint">Nên dùng tài khoản phụ. Phiên đăng nhập được lưu lại nên lần sau không cần quét.</p>
+      </div>
+    </div>
+    <div class="modal-f"><button class="btn" id="btnCancelLogin">Huỷ</button></div>
+  </div>
+</div>
+
+<!-- Hộp thoại dán danh sách -->
+<div class="modal-bg hidden" id="pasteModal">
+  <div class="modal" role="dialog" aria-labelledby="pasteTitle">
+    <div class="card-h"><h2 id="pasteTitle">Dán danh sách</h2></div>
+    <div class="card-b">
+      <p class="hint">Mỗi dòng một người: số điện thoại, rồi tên. Có thể copy thẳng 2 cột từ Excel rồi dán vào đây.</p>
+      <textarea id="pasteText" rows="10" placeholder="0901234567, Anh Nam&#10;0912345678	Chị Lan"></textarea>
+    </div>
+    <div class="modal-f">
+      <button class="btn" data-close="pasteModal">Huỷ</button>
+      <button class="btn primary" id="btnPasteOk">Thêm vào danh sách</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hộp thoại xem trước -->
+<div class="modal-bg hidden" id="previewModal">
+  <div class="modal" role="dialog" aria-labelledby="pvTitle">
+    <div class="card-h"><h2 id="pvTitle">Xem trước đợt gửi</h2></div>
+    <div class="card-b" id="pvList"></div>
+    <div class="modal-f"><button class="btn" data-close="previewModal">Đóng</button></div>
+  </div>
+</div>
+
+<!-- Hộp thoại quản lý tài khoản -->
+<div class="modal-bg hidden" id="usersModal">
+  <div class="modal wide" role="dialog" aria-labelledby="usersTitle">
+    <div class="card-h"><h2 id="usersTitle">Quản lý tài khoản</h2></div>
+    <div class="card-b">
+      <div class="tbl-wrap" style="overflow-x:auto">
+        <table class="users">
+          <thead><tr><th>Tên đăng nhập</th><th>Tên hiển thị</th><th>Vai trò</th><th></th></tr></thead>
+          <tbody id="usersBody"></tbody>
+        </table>
+      </div>
+      <h3 style="font-size:14px">Thêm tài khoản</h3>
+      <form class="add-user" id="addUserForm">
+        <label>Tên đăng nhập<input type="text" id="nuUser" required autocapitalize="off" spellcheck="false" placeholder="nhanvien1"></label>
+        <label>Tên hiển thị<input type="text" id="nuName" required placeholder="Nguyễn Văn A"></label>
+        <label>Vai trò<select id="nuRole"><option value="nhanvien">Nhân viên</option><option value="xem">Chỉ xem</option><option value="admin">Quản trị</option></select></label>
+        <label>Mật khẩu<input type="password" id="nuPass" required minlength="6" autocomplete="new-password" placeholder="Ít nhất 6 ký tự"></label>
+        <button class="btn primary" type="submit">Thêm</button>
+      </form>
+      <div class="form-err" id="usersErr"></div>
+      <div style="overflow-x:auto">
+        <table class="perm-table">
+          <thead><tr><th>Quyền</th><th>Quản trị</th><th>Nhân viên</th><th>Chỉ xem</th></tr></thead>
+          <tbody>
+            <tr><td>Xem danh sách, tiến độ, tải báo cáo</td><td>✓</td><td>✓</td><td>✓</td></tr>
+            <tr><td>Sửa danh sách, nhập Excel</td><td>✓</td><td>✓</td><td></td></tr>
+            <tr><td>Bắt đầu / dừng gửi, gửi lại 1 số</td><td>✓</td><td>✓</td><td></td></tr>
+            <tr><td>Sửa nội dung, cài đặt, xoá lịch sử</td><td>✓</td><td></td><td></td></tr>
+            <tr><td>Đăng nhập / đăng xuất Zalo</td><td>✓</td><td></td><td></td></tr>
+            <tr><td>Quản lý tài khoản</td><td>✓</td><td></td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-f"><button class="btn" data-close="usersModal">Đóng</button></div>
+  </div>
+</div>
+
+<!-- Hộp thoại đổi mật khẩu của mình -->
+<div class="modal-bg hidden" id="passModal">
+  <form class="modal" role="dialog" aria-labelledby="passTitle" id="passForm">
+    <div class="card-h"><h2 id="passTitle">Đổi mật khẩu</h2></div>
+    <div class="card-b">
+      <label class="f">Mật khẩu hiện tại<input type="password" id="pwCur" required autocomplete="current-password"></label>
+      <label class="f">Mật khẩu mới<input type="password" id="pwNew" required minlength="6" autocomplete="new-password"></label>
+      <label class="f">Nhập lại mật khẩu mới<input type="password" id="pwNew2" required autocomplete="new-password"></label>
+      <div class="form-err" id="pwErr"></div>
+    </div>
+    <div class="modal-f">
+      <button class="btn" type="button" data-close="passModal">Huỷ</button>
+      <button class="btn primary" type="submit">Lưu mật khẩu</button>
+    </div>
+  </form>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let me = null;            // người đang dùng Zalo Tool
+const can = (perm) => !!me && me.perms.includes(perm);
+let contacts = [];        // [{ sdt, ten }]
+let doneMap = {};         // sdtChuan -> kết quả
+let config = {};
+let st = {};              // trạng thái server
+let accountName = "";
+
+// ---------- tiện ích ----------
+function normalizePhone(raw) {
+  let p = String(raw ?? "").replace(/[^\d+]/g, "");
+  if (p.startsWith("+84")) p = "0" + p.slice(3);
+  else if (p.startsWith("84") && p.length === 11) p = "0" + p.slice(2);
+  else if (p.length === 9) p = "0" + p;
+  return /^0\d{9}$/.test(p) ? p : null;
+}
+const fill = (tpl, ten) => String(tpl || "").replace(/\{ten\}/gi, ten || "bạn").trim();
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function api(path, body, opts = {}) {
+  const res = await fetch(path, {
+    method: body === undefined && !opts.post ? "GET" : "POST",
+    headers: opts.raw ? { "Content-Type": "application/octet-stream" } : { "Content-Type": "application/json" },
+    body: opts.raw ? body : body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && !path.startsWith("/api/auth/")) showAuth(false);
+  if (!res.ok) throw new Error(data.error || "Có lỗi xảy ra");
+  return data;
+}
+function flash(id, text) {
+  $(id).textContent = text;
+  clearTimeout(flash[id]);
+  flash[id] = setTimeout(() => ($(id).textContent = ""), 2500);
+}
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+function showError(e) { addLog({ t: new Date().toLocaleTimeString("vi-VN"), text: e.message || String(e), level: "error" }); }
+
+// ---------- trạng thái từng người ----------
+function statusOf(c) {
+  const p = normalizePhone(c.sdt);
+  if (!String(c.sdt).trim()) return { cls: "warn", text: "Thiếu số" };
+  if (!p) return { cls: "bad", text: "Số sai" };
+  if (st.current === p) return { cls: "run", text: "Đang gửi" };
+  const r = doneMap[p];
+  if (!r) return { cls: "todo", text: "Chờ gửi" };
+  if (r.ketBan === "Lỗi" && r.tinNhan === "Lỗi") return { cls: "bad", text: "Lỗi", note: r.ghiChu };
+  if (r.tinNhan === "Lỗi") return { cls: "warn", text: "Lỗi tin nhắn", note: r.ghiChu };
+  return { cls: "ok", text: "Đã gửi", note: [r.tenZalo && `Zalo: ${r.tenZalo}`, r.thoiGian].filter(Boolean).join(" · ") };
+}
+// ---------- phạm vi (quản trị lọc theo nhân viên; nhân viên chỉ có số của mình) ----------
+let staff = [];           // người có thể được giao số
+let scope = "all";        // all | none | username
+const staffName = (u) => staff.find((s) => s.username === u)?.name || u;
+function inScope(c) {
+  if (!can("all") || scope === "all") return true;
+  if (scope === "none") return !c.phuTrach;
+  return c.phuTrach === scope;
+}
+const scopeLabel = () => scope === "all" ? "toàn bộ danh sách" : scope === "none" ? "các số chưa giao" : `danh sách của ${staffName(scope)}`;
+
+function pendingList(list = contacts.filter(inScope)) {
+  const seen = new Set();
+  return list.filter((c) => {
+    const p = normalizePhone(c.sdt);
+    if (!p || doneMap[p] || seen.has(p)) return false;
+    seen.add(p);
+    return true;
+  });
+}
+
+function renderScopeBar() {
+  $("scopeBar").classList.toggle("hidden", !can("all"));
+  $("btnAssign").classList.toggle("hidden", !can("settings"));
+  $("btnAssign").disabled = !!st.running;
+  const opts = [["all", "Tất cả"], ["none", "Chưa giao"], ...staff.map((s) => [s.username, s.name + (s.role === "admin" ? " (quản trị)" : "")])];
+  if (!opts.some(([v]) => v === scope)) scope = "all";
+  $("scopeSel").innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}" ${v === scope ? "selected" : ""}>${esc(l)}</option>`).join("");
+  $("listHint").textContent = can("all")
+    ? "Mỗi số giao cho một nhân viên phụ trách. Nhân viên chỉ thấy và chỉ gửi cho các số của mình."
+    : "Đây là các số quản trị giao cho bạn và số bạn tự thêm. Số đã gửi sẽ tự bỏ qua ở lần chạy sau.";
+}
+$("scopeSel").onchange = () => { scope = $("scopeSel").value; renderTable(); };
+
+// ---------- vẽ bảng ----------
+function renderTable() {
+  const locked = !!st.running || !can("list");
+  const lockSend = !!st.running || !can("send");
+  const showOwner = can("all");
+  const canAssign = can("settings");
+  $("thead").innerHTML = `<tr><th>#</th><th>Số điện thoại</th><th>Tên</th>${showOwner ? "<th>Phụ trách</th>" : ""}<th>Trạng thái</th><th></th></tr>`;
+  let n = 0;
+  $("tbody").innerHTML = contacts.map((c, i) => {
+    if (!inScope(c)) return "";
+    n++;
+    const s = statusOf(c);
+    const p = normalizePhone(c.sdt);
+    const owner = !showOwner ? "" : canAssign
+      ? `<td><select class="assign ${c.phuTrach ? "" : "none"}" data-assign="${i}" aria-label="Người phụ trách dòng ${n}" ${locked ? "disabled" : ""}>
+          <option value="">Chưa giao</option>${staff.map((u) => `<option value="${esc(u.username)}" ${u.username === c.phuTrach ? "selected" : ""}>${esc(u.name)}</option>`).join("")}
+        </select></td>`
+      : `<td class="owner">${c.phuTrach ? esc(staffName(c.phuTrach)) : "Chưa giao"}</td>`;
+    return `<tr data-i="${i}" class="${st.current && st.current === p ? "current" : ""}">
+      <td class="idx">${n}</td>
+      <td><input class="phone" id="sdt-${i}" value="${esc(c.sdt)}" placeholder="0901234567" aria-label="Số điện thoại dòng ${n}" ${locked ? "disabled" : ""}></td>
+      <td><input class="name" id="ten-${i}" value="${esc(c.ten)}" placeholder="Tên" aria-label="Tên dòng ${n}" ${locked ? "disabled" : ""}></td>
+      ${owner}
+      <td class="status">${statusCell(s)}</td>
+      <td class="act">${doneMap[p] && can("send") ? `<button class="btn sm link" data-reset="${p}" ${lockSend ? "disabled" : ""}>Gửi lại</button>` : ""}${can("list") ? `<button class="btn sm link" data-del="${i}" title="Xoá dòng" aria-label="Xoá dòng ${n}" ${locked ? "disabled" : ""}>Xoá</button>` : ""}</td>
+    </tr>`;
+  }).join("");
+  $("emptyList").classList.toggle("hidden", n > 0);
+  $("emptyList").innerHTML = contacts.length && !n
+    ? `Không có số nào trong ${esc(scopeLabel())}.`
+    : can("list") ? "Danh sách đang trống. Bấm <b>+ Thêm dòng</b>, <b>Dán danh sách</b> hoặc <b>Nhập file Excel</b> để bắt đầu."
+    : "Chưa có số nào được giao cho bạn.";
+  renderStats();
+}
+
+// Thống kê theo nhân viên (quản trị / chỉ xem)
+function renderStaffStats() {
+  $("staffCard").classList.toggle("hidden", !can("all") || !staff.length);
+  if (!can("all")) return;
+  const groups = [...staff.map((s) => ({ key: s.username, name: s.name })), { key: "none", name: "Chưa giao" }];
+  $("staffBody").innerHTML = groups.map((g) => {
+    const list = contacts.filter((c) => (g.key === "none" ? !c.phuTrach : c.phuTrach === g.key));
+    let ok = 0, bad = 0;
+    for (const c of list) {
+      const s = statusOf(c);
+      if (s.cls === "ok") ok++;
+      else if (s.cls === "bad" || s.cls === "warn") bad++;
+    }
+    const todo = pendingList(list).length;
+    if (g.key === "none" && !list.length) return "";
+    const pct = (x) => (list.length ? (x / list.length) * 100 : 0);
+    return `<tr data-scope="${esc(g.key)}" class="${g.key === "none" ? "unassigned" : ""} ${scope === g.key ? "active" : ""}" tabindex="0">
+      <td>${esc(g.name)}</td><td class="n">${list.length}</td><td class="n">${todo}</td><td class="n">${ok}</td><td class="n">${bad}</td>
+      <td><div class="bar" title="${ok} đã gửi, ${bad} lỗi / ${list.length}"><div class="ok" style="width:${pct(ok)}%"></div><div class="bad" style="width:${pct(bad)}%"></div></div></td>
+    </tr>`;
+  }).join("");
+}
+function pickScope(e) {
+  const tr = e.target.closest("tr[data-scope]");
+  if (!tr || (e.type === "keydown" && e.key !== "Enter")) return;
+  scope = scope === tr.dataset.scope ? "all" : tr.dataset.scope;
+  renderScopeBar();
+  renderTable();
+}
+$("staffBody").addEventListener("click", pickScope);
+$("staffBody").addEventListener("keydown", pickScope);
+const statusCell = (s) => `<span class="pill ${s.cls}">${s.text}</span>${s.note ? `<span class="note" title="${esc(s.note)}">${esc(s.note)}</span>` : ""}`;
+function refreshStatuses() {
+  document.querySelectorAll("#tbody tr").forEach((tr) => {
+    const c = contacts[tr.dataset.i];
+    if (!c) return;
+    tr.querySelector(".status").innerHTML = statusCell(statusOf(c));
+    tr.classList.toggle("current", !!st.current && st.current === normalizePhone(c.sdt));
+  });
+  renderStats();
+}
+function renderStats() {
+  const list = contacts.filter(inScope);
+  let ok = 0, bad = 0;
+  for (const c of list) {
+    const s = statusOf(c);
+    if (s.cls === "ok") ok++;
+    else if (s.cls === "bad" || s.cls === "warn") bad++;
+  }
+  $("stTotal").textContent = list.length;
+  $("stTodo").textContent = pendingList().length;
+  $("stOk").textContent = ok;
+  $("stBad").textContent = bad;
+  renderStaffStats();
+  renderRunControls();
+  renderPreview();
+}
+
+// ---------- lưu danh sách ----------
+let listDirty = false;    // đang có thay đổi chưa lưu -> không tải đè danh sách từ server
+const saveContacts = debounce(async () => {
+  try {
+    const r = await api("/api/contacts", { contacts });
+    listDirty = false;
+    setDoneFrom(r.contacts);
+    flash("listSaved", "Đã lưu");
+  } catch (e) { showError(e); }
+}, 600);
+function queueSave() { listDirty = true; saveContacts(); }
+const toLocal = (view) => view.map((c) => ({ sdt: c.sdt, ten: c.ten, phuTrach: c.phuTrach || null }));
+// Số mới thêm khi quản trị đang lọc theo một nhân viên thì giao luôn cho người đó
+const newOwner = () => (can("all") && scope !== "all" && scope !== "none" ? scope : null);
+
+// Người khác vừa sửa danh sách: tải lại
+async function reloadContacts() {
+  if (listDirty) return;
+  try {
+    const r = await api("/api/contacts");
+    if (listDirty) return;
+    contacts = toLocal(r.contacts);
+    staff = r.staff || [];
+    setDoneFrom(r.contacts);
+    renderScopeBar();
+    renderTable();
+  } catch {}
+}
+function setDoneFrom(view) {
+  doneMap = {};
+  for (const c of view) if (c.sdtChuan && c.ketQua) doneMap[c.sdtChuan] = c.ketQua;
+}
+
+$("tbody").addEventListener("input", (e) => {
+  const tr = e.target.closest("tr");
+  if (!tr) return;
+  const c = contacts[tr.dataset.i];
+  if (e.target.classList.contains("phone")) c.sdt = e.target.value;
+  else c.ten = e.target.value;
+  tr.querySelector(".status").innerHTML = statusCell(statusOf(c));
+  renderStats();
+  queueSave();
+});
+// Đổi người phụ trách
+$("tbody").addEventListener("change", (e) => {
+  const i = e.target.dataset.assign;
+  if (i === undefined) return;
+  contacts[i].phuTrach = e.target.value || null;
+  renderTable();
+  queueSave();
+});
+$("tbody").addEventListener("click", async (e) => {
+  const del = e.target.dataset.del;
+  const reset = e.target.dataset.reset;
+  if (del !== undefined) {
+    contacts.splice(Number(del), 1);
+    renderTable();
+    queueSave();
+  } else if (reset) {
+    try {
+      const r = await api("/api/reset", { sdt: reset });
+      setDoneFrom(r.contacts);
+      renderTable();
+    } catch (err) { showError(err); }
+  }
+});
+$("btnAddRow").onclick = () => {
+  if (can("all") && scope === "none") { scope = "all"; renderScopeBar(); }
+  contacts.push({ sdt: "", ten: "", phuTrach: newOwner() });
+  renderTable();
+  $(`sdt-${contacts.length - 1}`)?.focus();
+};
+$("btnAssign").onclick = async () => {
+  try {
+    const r = await api("/api/assign", {});
+    contacts = toLocal(r.contacts);
+    setDoneFrom(r.contacts);
+    renderTable();
+    if (!r.chia) addLog({ t: new Date().toLocaleTimeString("vi-VN"), text: "Không còn số nào chưa giao.", level: "warn" });
+  } catch (e) { showError(e); }
+};
+let clearArmed = false;
+$("btnClearList").onclick = () => {
+  if (!clearArmed) {
+    clearArmed = true;
+    $("btnClearList").textContent = "Bấm lần nữa để xoá";
+    setTimeout(() => { clearArmed = false; $("btnClearList").textContent = "Xoá hết danh sách"; }, 3000);
+    return;
+  }
+  clearArmed = false;
+  $("btnClearList").textContent = "Xoá hết danh sách";
+  // Quản trị đang lọc theo nhân viên thì chỉ xoá các số đang hiển thị
+  contacts = contacts.filter((c) => !inScope(c));
+  renderTable();
+  queueSave();
+};
+
+// Thêm nhiều người, bỏ qua số đã có trong danh sách
+function addMany(rows) {
+  const have = new Set(contacts.map((c) => normalizePhone(c.sdt) || c.sdt));
+  let added = 0, skipped = 0;
+  for (const r of rows) {
+    const key = normalizePhone(r.sdt) || String(r.sdt).trim();
+    if (!key) continue;
+    if (have.has(key)) { skipped++; continue; }
+    have.add(key);
+    contacts.push({ sdt: String(r.sdt).trim(), ten: String(r.ten || "").trim(), phuTrach: newOwner() });
+    added++;
+  }
+  renderTable();
+  queueSave();
+  const to = newOwner() ? ` cho ${staffName(newOwner())}` : can("all") ? " (chưa giao cho ai)" : "";
+  addLog({ t: new Date().toLocaleTimeString("vi-VN"), text: `Đã thêm ${added} người${to}${skipped ? `, bỏ qua ${skipped} số trùng` : ""}.`, level: "ok" });
+}
+
+// Dán từ Excel / văn bản
+$("btnPaste").onclick = () => { $("pasteText").value = ""; openModal("pasteModal"); $("pasteText").focus(); };
+$("btnPasteOk").onclick = () => {
+  const rows = $("pasteText").value.split(/\r?\n/).map((line) => {
+    const m = line.trim().match(/^([+\d][\d\s.\-]*\d)\s*[\t,;|]?\s*(.*)$/);
+    return m ? { sdt: m[1].replace(/[\s.\-]/g, ""), ten: m[2].trim() } : null;
+  }).filter(Boolean);
+  closeModal("pasteModal");
+  addMany(rows);
+};
+
+// Nhập file Excel
+$("btnImport").onclick = () => $("fileInput").click();
+$("fileInput").onchange = async () => {
+  const f = $("fileInput").files[0];
+  $("fileInput").value = "";
+  if (!f) return;
+  try {
+    const r = await api("/api/import", await f.arrayBuffer(), { raw: true });
+    if (!r.rows.length) throw new Error("Không đọc được dòng nào. File cần có cột SĐT (hoặc Số điện thoại / Phone) và cột Tên.");
+    addMany(r.rows);
+  } catch (e) { showError(e); }
+};
+
+// ---------- nội dung & cài đặt ----------
+const CFG_TEXT = ["loiMoiKetBan", "noiDungTinNhan"];
+const CFG_NUM = ["gioiHanMoiLan", "choToiThieuGiay", "choToiDaGiay"];
+const CFG_BOOL = ["guiKetBan", "guiTinNhan"];
+function renderConfig() {
+  CFG_TEXT.forEach((k) => ($(k).value = config[k] ?? ""));
+  CFG_NUM.forEach((k) => ($(k).value = config[k] ?? ""));
+  CFG_BOOL.forEach((k) => ($(k).checked = !!config[k]));
+  renderPreview();
+}
+function renderPreview() {
+  const first = pendingList()[0] || contacts[0];
+  const ten = first?.ten || "Anh Nam";
+  $("pvLabel").textContent = `Lời mời (ví dụ cho "${ten}")`;
+  $("pvInvite").textContent = $("guiKetBan").checked ? fill($("loiMoiKetBan").value, ten) : "(đang tắt)";
+  $("pvMsg").textContent = $("guiTinNhan").checked ? fill($("noiDungTinNhan").value, ten) : "(đang tắt)";
+  const n = fill($("loiMoiKetBan").value, ten).length;
+  $("inviteCount").textContent = `${n}/150 ký tự`;
+  $("inviteCount").classList.toggle("over", n > 150);
+}
+const saveConfig = debounce(async () => {
+  const body = {};
+  CFG_TEXT.forEach((k) => (body[k] = $(k).value));
+  CFG_NUM.forEach((k) => (body[k] = Number($(k).value)));
+  CFG_BOOL.forEach((k) => (body[k] = $(k).checked));
+  try {
+    config = (await api("/api/config", body)).config;
+    flash("cfgSaved", "Đã lưu");
+  } catch (e) { showError(e); }
+}, 700);
+[...CFG_TEXT, ...CFG_NUM, ...CFG_BOOL].forEach((k) => $(k).addEventListener("input", () => { renderPreview(); saveConfig(); }));
+// Hiện lại giá trị đã được giới hạn (vd. chờ dưới 30s) khi rời ô
+CFG_NUM.forEach((k) => $(k).addEventListener("blur", () => setTimeout(() => ($(k).value = config[k]), 900)));
+
+// ---------- đăng nhập ----------
+$("btnLogin").onclick = async () => {
+  try { await api("/api/login", { qr: false }); openModal("loginModal"); } catch (e) { showError(e); }
+};
+$("btnCancelLogin").onclick = async () => { closeModal("loginModal"); try { await api("/api/login/cancel", {}); } catch {} };
+let logoutArmed = false;
+$("btnLogout").onclick = async () => {
+  if (!logoutArmed) {
+    logoutArmed = true;
+    $("btnLogout").textContent = "Bấm lần nữa để đăng xuất";
+    setTimeout(() => { logoutArmed = false; $("btnLogout").textContent = "Đăng xuất"; }, 3000);
+    return;
+  }
+  logoutArmed = false;
+  $("btnLogout").textContent = "Đăng xuất";
+  try { await api("/api/logout", {}); } catch (e) { showError(e); }
+};
+
+// ---------- gửi ----------
+function renderRunControls() {
+  const pending = pendingList().length;
+  const loggedIn = st.login === "in";
+  const n = Math.min(pending, Number(config.gioiHanMoiLan) || 0);
+  // Chỉ người đang gửi hoặc quản trị thấy nút Dừng
+  const mayStop = can("send") && (st.runBy?.username === me?.username || can("settings"));
+  $("btnStart").classList.toggle("hidden", !!st.running || !can("send"));
+  $("btnStop").classList.toggle("hidden", !st.running || !mayStop);
+  $("btnStop").disabled = !!st.stopRequested;
+  $("btnStop").textContent = st.stopRequested ? "Đang dừng..." : "Dừng";
+  $("btnStart").disabled = !loggedIn || !pending;
+  $("btnPreview").disabled = !pending;
+  $("btnResetAll").classList.toggle("hidden", !can("settings"));
+  $("btnResetAll").disabled = !!st.running;
+  $("runHint").textContent = st.running ? (st.runBy && st.runBy.username !== me?.username ? `${st.runBy.name} đang gửi. Chờ xong rồi bạn gửi tiếp.` : "") :
+    !can("send") ? "Tài khoản chỉ xem: không bắt đầu gửi được." :
+    !loggedIn ? (can("zalo") ? "Đăng nhập Zalo trước khi gửi." : "Zalo chưa đăng nhập. Nhờ quản trị viên đăng nhập Zalo.") :
+    !pending ? "Không còn ai chờ gửi. Thêm số mới vào danh sách." :
+    `Lần này sẽ gửi cho ${n} người${pending > n ? ` (còn ${pending - n} người cho lần sau)` : ""}.`;
+  if (st.running) $("confirmBox").classList.add("hidden");
+  ["btnAddRow", "btnPaste", "btnImport", "btnClearList"].forEach((id) => ($(id).disabled = !!st.running || !can("list")));
+}
+$("btnStart").onclick = () => {
+  const n = Math.min(pendingList().length, Number(config.gioiHanMoiLan) || 0);
+  const what = [config.guiKetBan && "lời mời kết bạn", config.guiTinNhan && "tin nhắn"].filter(Boolean).join(" và ");
+  const from = can("all") ? ` trong <b>${esc(scopeLabel())}</b>` : "";
+  $("confirmText").innerHTML = `Gửi ${esc(what)} cho <b>${n} người</b>${from} bằng tài khoản Zalo <b>${esc(accountName)}</b>? Mỗi người cách nhau ${config.choToiThieuGiay}–${config.choToiDaGiay} giây.`;
+  $("confirmBox").classList.remove("hidden");
+};
+$("btnCancelConfirm").onclick = () => $("confirmBox").classList.add("hidden");
+$("btnConfirm").onclick = async () => {
+  $("confirmBox").classList.add("hidden");
+  try { await api("/api/start", { phamVi: scope }); } catch (e) { showError(e); }
+};
+$("btnStop").onclick = async () => { try { await api("/api/stop", {}); } catch (e) { showError(e); } };
+let resetArmed = false;
+$("btnResetAll").onclick = async () => {
+  if (!resetArmed) {
+    resetArmed = true;
+    $("btnResetAll").textContent = "Bấm lần nữa: gửi lại cho tất cả";
+    setTimeout(() => { resetArmed = false; $("btnResetAll").textContent = "Xoá lịch sử gửi"; }, 3500);
+    return;
+  }
+  resetArmed = false;
+  $("btnResetAll").textContent = "Xoá lịch sử gửi";
+  try { setDoneFrom((await api("/api/reset", {})).contacts); renderTable(); } catch (e) { showError(e); }
+};
+$("btnPreview").onclick = async () => {
+  try {
+    const { items } = await api("/api/preview", { phamVi: scope });
+    $("pvTitle").textContent = `Xem trước đợt gửi (${items.length} người)`;
+    $("pvList").innerHTML = items.map((it, i) => `<div class="pv-item">
+      <h3>${i + 1}. ${esc(it.sdt)} · ${esc(it.ten || "không tên")}</h3>
+      ${it.loiMoi !== null ? `<div class="preview"><span class="lbl">Lời mời</span>${esc(it.loiMoi)}</div>` : ""}
+      ${it.tinNhan !== null ? `<div class="preview"><span class="lbl">Tin nhắn</span>${esc(it.tinNhan)}</div>` : ""}
+    </div>`).join("") || `<p class="hint">Không còn ai chờ gửi.</p>`;
+    openModal("previewModal");
+  } catch (e) { showError(e); }
+};
+
+// Đồng hồ đếm ngược khi đang chờ
+setInterval(() => {
+  if (!st.running) return;
+  if (st.waitUntil && !st.current) {
+    const s = Math.max(0, Math.round((st.waitUntil - Date.now()) / 1000));
+    $("runNow").textContent = st.stopRequested ? "Đang dừng..." : `Chờ ${s} giây trước người tiếp theo`;
+  }
+}, 1000);
+
+function renderState() {
+  const dot = $("acctDot");
+  dot.className = "dot" + (st.login === "in" ? " in" : st.login === "out" ? "" : " wait");
+  accountName = st.account || "";
+  $("acctText").textContent = "Zalo: " + (st.login === "in" ? accountName : st.login === "checking" ? "đang đăng nhập..." : st.login === "qr" ? "chờ quét QR" : "chưa đăng nhập");
+  $("btnLogin").classList.toggle("hidden", st.login === "in" || !can("zalo"));
+  $("btnLogin").disabled = st.login === "checking" || st.login === "qr";
+  $("btnLogout").classList.toggle("hidden", st.login !== "in" || !can("zalo"));
+
+  // Hộp QR
+  if (st.login === "qr" && st.qr) {
+    $("qrImg").src = st.qr;
+    $("qrImg").classList.remove("hidden");
+    $("qrWaiting").classList.add("hidden");
+    openModal("loginModal");
+  } else {
+    $("qrImg").classList.add("hidden");
+    $("qrWaiting").classList.remove("hidden");
+    $("qrWaiting").textContent = st.login === "checking" ? "Đang kết nối Zalo..." : "Đang tạo mã QR...";
+  }
+  if (st.login === "in" || st.login === "out") closeModal("loginModal");
+
+  // Tiến độ
+  $("runBox").classList.toggle("hidden", !st.running);
+  if (st.running && st.progress) {
+    $("runCount").textContent = `${st.progress.i}/${st.progress.total}`;
+    $("runBar").style.width = `${(st.progress.i / st.progress.total) * 100}%`;
+    if (st.current) $("runNow").textContent = `${st.runBy?.name || ""} đang gửi ${st.current}`.trim();
+  }
+  renderScopeBar();
+  CFG_TEXT.concat(CFG_NUM, CFG_BOOL).forEach((k) => ($(k).disabled = !!st.running || !can("settings")));
+  // Bắt đầu / kết thúc đợt gửi thì vẽ lại cả bảng (khoá ô nhập, hiện nút Gửi lại)
+  if (renderState.wasRunning !== !!st.running) renderTable();
+  else refreshStatuses();
+  renderState.wasRunning = !!st.running;
+}
+
+// ---------- nhật ký ----------
+function addLog(e) {
+  const box = $("log");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 30;
+  const div = document.createElement("div");
+  div.className = e.level || "";
+  div.innerHTML = `<span class="t">${esc(e.t)}</span>${esc(e.text)}`;
+  box.appendChild(div);
+  while (box.children.length > 300) box.firstChild.remove();
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+// ---------- hộp thoại ----------
+function openModal(id) { $(id).classList.remove("hidden"); }
+function closeModal(id) { $(id).classList.add("hidden"); }
+document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => closeModal(b.dataset.close)));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") ["pasteModal", "previewModal"].forEach(closeModal);
+});
+
+// ---------- khởi động ----------
+async function init() {
+  const s = await api("/api/state");
+  config = s.config;
+  contacts = toLocal(s.contacts);
+  staff = s.staff || [];
+  setDoneFrom(s.contacts);
+  st = s;
+  renderScopeBar();
+  $("log").innerHTML = "";
+  s.logs.forEach(addLog);
+  renderConfig();
+  renderTable();
+  renderState();
+}
+
+let es = null;
+function connect() {
+  es?.close();
+  es = new EventSource("/api/events");
+  es.addEventListener("state", (e) => { st = JSON.parse(e.data); renderState(); });
+  es.addEventListener("log", (e) => addLog(JSON.parse(e.data)));
+  es.addEventListener("contacts", (e) => { if (JSON.parse(e.data).by !== me?.username) reloadContacts(); });
+  es.addEventListener("result", (e) => {
+    const { sdt, ketQua } = JSON.parse(e.data);
+    doneMap[sdt] = ketQua;
+    refreshStatuses();
+  });
+  es.onopen = () => $("connAlert").classList.add("hidden");
+  // Lỗi kết nối có thể do hết phiên đăng nhập: kiểm tra lại
+  es.onerror = async () => {
+    $("connAlert").classList.remove("hidden");
+    try { if (!(await api("/api/me")).user) showAuth(false); } catch {}
+  };
+}
+
+// ---------- tài khoản Zalo Tool ----------
+let setupMode = false;
+function showAuth(needsSetup) {
+  es?.close();
+  es = null;
+  me = null;
+  setupMode = !!needsSetup;
+  ["usersModal", "passModal", "loginModal", "pasteModal", "previewModal"].forEach(closeModal);
+  $("authTitle").textContent = setupMode ? "Tạo tài khoản quản trị" : "Đăng nhập";
+  $("authSubmit").textContent = setupMode ? "Tạo tài khoản và vào" : "Đăng nhập";
+  ["authSetupHint", "authNameRow", "authPass2Row"].forEach((id) => $(id).classList.toggle("hidden", !setupMode));
+  $("authName").required = $("authPass2").required = setupMode;
+  $("authPass").autocomplete = setupMode ? "new-password" : "current-password";
+  $("authPass").value = $("authPass2").value = "";
+  $("authErr").textContent = "";
+  $("authScreen").classList.remove("hidden");
+  (setupMode ? $("authName") : $("authUser")).focus();
+}
+
+$("authForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("authErr").textContent = "";
+  if (setupMode && $("authPass").value !== $("authPass2").value) return ($("authErr").textContent = "Hai mật khẩu không khớp");
+  try {
+    const body = { username: $("authUser").value, password: $("authPass").value };
+    if (setupMode) body.name = $("authName").value;
+    const r = await api(setupMode ? "/api/auth/setup" : "/api/auth/login", body);
+    startApp(r.user);
+  } catch (err) { $("authErr").textContent = err.message; }
+});
+
+$("btnSignOut").onclick = async () => {
+  try { await api("/api/auth/logout", {}); } catch {}
+  showAuth(false);
+};
+
+function applyMe() {
+  $("meName").textContent = me.name;
+  $("meRole").textContent = me.roleLabel;
+  $("meRole").className = `role ${me.role}`;
+  $("btnUsers").classList.toggle("hidden", !can("users"));
+  document.querySelectorAll("[data-lock]").forEach((el) => el.classList.toggle("hidden", can(el.dataset.lock)));
+}
+
+async function startApp(user) {
+  me = user;
+  $("authScreen").classList.add("hidden");
+  applyMe();
+  renderState.wasRunning = undefined;
+  await init();
+  connect();
+}
+
+// Đổi mật khẩu của mình
+$("btnMyPass").onclick = () => {
+  ["pwCur", "pwNew", "pwNew2"].forEach((id) => ($(id).value = ""));
+  $("pwErr").textContent = "";
+  openModal("passModal");
+  $("pwCur").focus();
+};
+$("passForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if ($("pwNew").value !== $("pwNew2").value) return ($("pwErr").textContent = "Hai mật khẩu mới không khớp");
+  try {
+    await api("/api/auth/password", { current: $("pwCur").value, next: $("pwNew").value });
+    // Đổi mật khẩu sẽ đăng xuất mọi phiên, nên đăng nhập lại
+    const username = me.username;
+    closeModal("passModal");
+    showAuth(false);
+    $("authUser").value = username;
+    $("authPass").focus();
+    $("authErr").textContent = "Đã đổi mật khẩu. Đăng nhập lại bằng mật khẩu mới.";
+  } catch (err) { $("pwErr").textContent = err.message; }
+});
+
+// Quản lý tài khoản (quản trị)
+const ROLE_OPTS = [["admin", "Quản trị"], ["nhanvien", "Nhân viên"], ["xem", "Chỉ xem"]];
+function renderUsers(users) {
+  $("usersBody").innerHTML = users.map((u) => {
+    const self = u.username === me.username;
+    return `<tr data-u="${esc(u.username)}">
+      <td class="mono">${esc(u.username)}${self ? ' <span class="hint">(bạn)</span>' : ""}</td>
+      <td>${esc(u.name)}</td>
+      <td><select data-role aria-label="Vai trò của ${esc(u.username)}" ${self ? "disabled" : ""}>${ROLE_OPTS.map(([v, l]) => `<option value="${v}" ${v === u.role ? "selected" : ""}>${l}</option>`).join("")}</select></td>
+      <td class="act">
+        <button class="btn sm link" type="button" data-pass>Đặt lại mật khẩu</button>
+        ${self ? "" : `<button class="btn sm link" type="button" data-del-user style="color:var(--bad)">Xoá</button>`}
+      </td>
+    </tr>
+    <tr class="hidden" data-pass-row="${esc(u.username)}"><td colspan="4">
+      <div class="row"><input type="password" placeholder="Mật khẩu mới cho ${esc(u.username)} (ít nhất 6 ký tự)" autocomplete="new-password" style="flex:1;min-width:180px">
+      <button class="btn sm primary" type="button" data-pass-save>Lưu</button></div>
+    </td></tr>`;
+  }).join("");
+}
+async function loadUsers() {
+  $("usersErr").textContent = "";
+  try { renderUsers((await api("/api/users")).users); } catch (e) { $("usersErr").textContent = e.message; }
+}
+$("btnUsers").onclick = () => { openModal("usersModal"); loadUsers(); };
+$("usersBody").addEventListener("change", async (e) => {
+  if (!e.target.matches("[data-role]")) return;
+  const username = e.target.closest("tr").dataset.u;
+  try { renderUsers((await api("/api/users/update", { username, role: e.target.value })).users); $("usersErr").textContent = ""; }
+  catch (err) { $("usersErr").textContent = err.message; loadUsers(); }
+});
+const delArmed = {};
+$("usersBody").addEventListener("click", async (e) => {
+  const tr = e.target.closest("tr");
+  if (!tr) return;
+  if (e.target.matches("[data-pass]")) {
+    const row = $("usersBody").querySelector(`[data-pass-row="${CSS.escape(tr.dataset.u)}"]`);
+    row.classList.toggle("hidden");
+    row.querySelector("input").focus();
+  } else if (e.target.matches("[data-pass-save]")) {
+    const username = tr.dataset.passRow;
+    try {
+      renderUsers((await api("/api/users/update", { username, password: tr.querySelector("input").value })).users);
+      $("usersErr").textContent = "";
+      addLog({ t: new Date().toLocaleTimeString("vi-VN"), text: `Đã đặt lại mật khẩu cho ${username}.`, level: "ok" });
+    } catch (err) { $("usersErr").textContent = err.message; }
+  } else if (e.target.matches("[data-del-user]")) {
+    const username = tr.dataset.u;
+    if (!delArmed[username]) {
+      delArmed[username] = true;
+      e.target.textContent = "Bấm lần nữa để xoá";
+      setTimeout(() => { delArmed[username] = false; e.target.textContent = "Xoá"; }, 3000);
+      return;
+    }
+    try { renderUsers((await api("/api/users/delete", { username })).users); $("usersErr").textContent = ""; }
+    catch (err) { $("usersErr").textContent = err.message; }
+  }
+});
+$("addUserForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const users = (await api("/api/users", { username: $("nuUser").value, name: $("nuName").value, role: $("nuRole").value, password: $("nuPass").value })).users;
+    renderUsers(users);
+    ["nuUser", "nuName", "nuPass"].forEach((id) => ($(id).value = ""));
+    $("usersErr").textContent = "";
+  } catch (err) { $("usersErr").textContent = err.message; }
+});
+
+// ---------- khởi động ----------
+(async () => {
+  try {
+    const r = await api("/api/me");
+    if (r.user) await startApp(r.user);
+    else showAuth(r.needsSetup);
+  } catch (e) {
+    $("connAlert").classList.remove("hidden");
+    showError(e);
+  }
+})();
+</script>
+</body>
+</html>

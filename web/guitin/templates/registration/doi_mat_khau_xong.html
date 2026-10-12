@@ -1,0 +1,18 @@
+{% load static %}<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Đã đổi mật khẩu · Zalo Tool</title>
+<link rel="stylesheet" href="{% static 'guitin/app.css' %}">
+</head>
+<body>
+<main class="auth">
+  <div class="auth-card">
+    <div class="brand"><span class="logo">Z</span>Zalo Tool</div>
+    <div class="ok-box">Đã đổi mật khẩu. Lần đăng nhập sau dùng mật khẩu mới.</div>
+    <a class="btn primary big" href="{% url 'trang-chu' %}" style="text-align:center">Về trang gửi tin</a>
+  </div>
+</main>
+</body>
+</html>

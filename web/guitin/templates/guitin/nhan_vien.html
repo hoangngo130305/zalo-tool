@@ -1,0 +1,198 @@
+{% load static %}<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zalo Tool</title>
+<link rel="stylesheet" href="{% static 'guitin/app.css' %}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="logo">Z</span>Zalo Tool</div>
+    <div class="spacer"></div>
+    <div class="acct"><span class="dot" id="acctDot"></span><span id="acctText">Zalo: đang kiểm tra...</span></div>
+    <div class="me">
+      <span>{{ me.name }}</span><span class="role {{ me.role }}">{{ me.roleLabel }}</span>
+      <a class="btn sm link" href="{% url 'doi-mat-khau' %}">Đổi mật khẩu</a>
+      <form class="inline" method="post" action="{% url 'dang-xuat' %}">{% csrf_token %}<button class="btn sm link" type="submit">Thoát</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="alert hidden" id="connAlert">Mất kết nối tới Zalo Tool. Kiểm tra máy chạy tool còn bật không, hoặc tải lại trang.</div>
+  <div class="alert hidden" id="workerAlert">Phần gửi Zalo đang tắt nên chưa gửi được tin. Báo quản trị viên kiểm tra.</div>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tabGui" aria-selected="true" aria-controls="panelGui">Gửi tin</button>
+    <button class="tab" role="tab" id="tabLichSu" aria-selected="false" aria-controls="panelLichSu">Lịch sử gửi</button>
+  </nav>
+
+  <!-- ===== Tab gửi tin ===== -->
+  <div id="panelGui" role="tabpanel" aria-labelledby="tabGui" class="wrap" style="padding:0">
+    <section class="stats">
+      <div class="stat"><div class="k">Số của tôi</div><div class="v" id="stTotal">0</div></div>
+      <div class="stat todo"><div class="k">Chờ gửi</div><div class="v" id="stTodo">0</div></div>
+      <div class="stat ok"><div class="k">Đã gửi</div><div class="v" id="stOk">0</div></div>
+      <div class="stat bad"><div class="k">Lỗi / thiếu thông tin</div><div class="v" id="stBad">0</div></div>
+    </section>
+
+    <div class="main">
+      <div class="col">
+        <section class="card">
+          <div class="card-h"><span class="num">1</span><h2>Danh sách người nhận</h2><span class="saved" id="listSaved"></span></div>
+          <div class="card-b">
+            <div class="toolbar">
+              <button class="btn sm" id="btnAddRow">+ Thêm dòng</button>
+              <button class="btn sm" id="btnPaste">Dán danh sách</button>
+              <button class="btn sm" id="btnImport">Nhập file Excel</button>
+              <a class="btn sm link" href="{% url 'file-mau' %}">Tải file mẫu</a>
+              <input type="file" id="fileInput" accept=".xlsx,.csv" class="hidden">
+              <div class="spacer"></div>
+              <button class="btn sm danger" id="btnClearList">Xoá hết</button>
+            </div>
+            <p class="hint">File Excel gồm 3 cột: <b>SĐT</b>, <b>Họ tên</b>, <b>Nội dung</b>. Ô Nội dung để trống thì gửi nội dung mặc định. Dùng <b>{ten}</b> để chèn họ tên. Số đã gửi sẽ tự bỏ qua.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>#</th><th>Số điện thoại</th><th>Họ tên</th><th>Nội dung tin nhắn</th><th>Trạng thái</th><th></th></tr></thead>
+              <tbody id="tbody"></tbody>
+            </table>
+            <div class="empty hidden" id="emptyList">Chưa có số nào. Bấm <b>+ Thêm dòng</b>, <b>Dán danh sách</b> hoặc <b>Nhập file Excel</b>.</div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col">
+        <section class="card" id="zaloCard">
+          <div class="card-h"><h2>Zalo của tôi</h2><span class="saved" id="zState"></span></div>
+          <div class="card-b">
+            <div class="row"><span class="dot" id="zDot"></span><b id="zAccount">Chưa kết nối</b></div>
+            <div class="qr-box hidden" id="zQrBox">
+              <img id="zQr" alt="Mã QR đăng nhập Zalo">
+              <ol class="steps">
+                <li>Mở app <b>Zalo</b> trên điện thoại <b>của bạn</b>.</li>
+                <li>Bấm biểu tượng <b>quét QR</b> ở góc trên, quét mã này.</li>
+                <li>Bấm <b>Đăng nhập</b> trên điện thoại để xác nhận.</li>
+              </ol>
+            </div>
+            <div class="row">
+              <button class="btn primary" id="zConnect">Kết nối Zalo của tôi</button>
+              <button class="btn hidden" id="zCancel">Huỷ</button>
+              <button class="btn sm link hidden" id="zLogout">Ngắt kết nối Zalo</button>
+            </div>
+            <p class="hint" style="margin:0">Lời mời kết bạn và tin nhắn sẽ được gửi <b>từ tài khoản Zalo này</b>. Phiên được lưu lại, lần sau không cần quét. Gửi nhiều cho người lạ có thể bị Zalo hạn chế tài khoản, nên dùng Zalo dành cho công việc.</p>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-h"><span class="num">2</span><h2>Gửi tự động</h2></div>
+          <div class="card-b">
+            <p class="hint" style="margin:0">Bấm một lần, tool tự gửi lời mời kết bạn rồi gửi tin nhắn cho từng người, cách nhau vài phút để tránh bị Zalo khoá.</p>
+            <div class="run-btns">
+              <button class="btn" id="btnPreview">Xem trước</button>
+              <button class="btn primary big" id="btnStart">Bắt đầu gửi</button>
+              <button class="btn danger solid big hidden" id="btnStop">Dừng</button>
+            </div>
+            <div class="hint" id="runHint"></div>
+            <div class="confirm hidden" id="confirmBox">
+              <div id="confirmText"></div>
+              <div class="row">
+                <button class="btn primary sm" id="btnConfirm">Xác nhận gửi</button>
+                <button class="btn sm" id="btnCancelConfirm">Huỷ</button>
+              </div>
+            </div>
+            <div class="hidden" id="runBox">
+              <div class="run-status"><span id="runNow">Đang chuẩn bị...</span><b id="runCount">0/0</b></div>
+              <div class="progress"><div id="runBar"></div></div>
+            </div>
+            <div class="log" id="log" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-h"><span class="num">3</span><h2>Tin nhắn gửi hàng loạt</h2><span class="saved" id="myMsgSaved"></span></div>
+          <div class="card-b">
+            <label class="f" for="myMsg">
+              <span class="row">Tin nhắn của tôi <span class="count" id="myMsgCount"></span></span>
+              <textarea id="myMsg" rows="6" placeholder="Soạn tin nhắn gửi cho tất cả người trong danh sách..."></textarea>
+            </label>
+            <div class="row">
+              <button class="btn sm" type="button" id="btnInsertTen">Chèn {ten}</button>
+              <button class="btn sm link" type="button" id="btnUseAdmin">Dùng nội dung của quản trị</button>
+            </div>
+            <p class="hint" style="margin:0">Gửi cho mọi người <b>không có nội dung riêng</b> ở bảng bên trái. <b>{ten}</b> được thay bằng họ tên từng người. Để trống thì dùng nội dung của quản trị.</p>
+            <div class="preview"><span class="lbl" id="pvMsgLabel">Xem trước</span><span id="pvMsg"></span></div>
+            <div class="preview"><span class="lbl" id="pvLabel">Lời mời kết bạn (do quản trị soạn)</span><span id="pvInvite"></span></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Tab lịch sử ===== -->
+  <div id="panelLichSu" role="tabpanel" aria-labelledby="tabLichSu" class="hidden">
+    <section class="card">
+      <div class="card-h"><h2>Lịch sử gửi của tôi</h2></div>
+      <div class="card-b">
+        <form class="filters" id="histForm">
+          <label>Tìm<input type="search" id="hQ" placeholder="SĐT, họ tên, nội dung..."></label>
+          <label>Kết quả
+            <select id="hTt"><option value="">Tất cả</option><option value="ok">Thành công</option><option value="loi">Lỗi</option></select>
+          </label>
+          <label>Từ ngày<input type="date" id="hTu"></label>
+          <label>Đến ngày<input type="date" id="hDen"></label>
+          <button class="btn sm primary" type="submit">Lọc</button>
+          <button class="btn sm" type="button" id="hReset">Xoá lọc</button>
+          <div class="spacer"></div>
+          <a class="btn sm" id="hExcel" href="/api/lich-su/excel">Xuất Excel theo bộ lọc</a>
+          <a class="btn sm primary" href="/api/lich-su/excel?tt=ok">Xuất Excel người đã gửi thành công</a>
+        </form>
+        <div class="sum"><span>Tổng: <b id="hTong">0</b></span><span style="color:var(--ok)">Thành công: <b id="hOk">0</b></span><span style="color:var(--bad)">Lỗi: <b id="hLoi">0</b></span></div>
+      </div>
+      <div class="table-wrap" style="max-height:none">
+        <table class="hist">
+          <thead><tr><th>Thời gian</th><th>SĐT</th><th>Họ tên</th><th>Tên Zalo</th><th>Kết quả</th><th>Nội dung đã gửi</th><th>Ghi chú</th></tr></thead>
+          <tbody id="hBody"></tbody>
+        </table>
+        <div class="empty hidden" id="hEmpty">Chưa có lịch sử gửi nào khớp bộ lọc.</div>
+      </div>
+      <div class="pager">
+        <button class="btn sm" id="hPrev">‹ Trước</button>
+        <span id="hPage">Trang 1/1</span>
+        <button class="btn sm" id="hNext">Sau ›</button>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- Dán danh sách -->
+<div class="modal-bg hidden" id="pasteModal">
+  <div class="modal" role="dialog" aria-labelledby="pasteTitle">
+    <div class="card-h"><h2 id="pasteTitle">Dán danh sách</h2></div>
+    <div class="card-b">
+      <p class="hint">Mỗi dòng một người: <b>SĐT, Họ tên, Nội dung</b>. Có thể copy thẳng 2–3 cột từ Excel rồi dán vào đây. Nội dung có thể bỏ trống.</p>
+      <textarea id="pasteText" rows="10" placeholder="0901234567, Anh Nam, Chào {ten}, em gửi anh thông tin ạ&#10;0912345678	Chị Lan	Chào chị Lan..."></textarea>
+    </div>
+    <div class="modal-f">
+      <button class="btn" data-close="pasteModal">Huỷ</button>
+      <button class="btn primary" id="btnPasteOk">Thêm vào danh sách</button>
+    </div>
+  </div>
+</div>
+
+<!-- Xem trước -->
+<div class="modal-bg hidden" id="previewModal">
+  <div class="modal" role="dialog" aria-labelledby="pvTitle">
+    <div class="card-h"><h2 id="pvTitle">Xem trước đợt gửi</h2></div>
+    <div class="card-b" id="pvList"></div>
+    <div class="modal-f"><button class="btn" data-close="previewModal">Đóng</button></div>
+  </div>
+</div>
+
+{{ me|json_script:"me-data" }}
+<script src="{% static 'guitin/nhan_vien.js' %}"></script>
+</body>
+</html>

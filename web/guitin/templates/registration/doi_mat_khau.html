@@ -1,0 +1,28 @@
+{% load static %}<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Đổi mật khẩu · Zalo Tool</title>
+<link rel="stylesheet" href="{% static 'guitin/app.css' %}">
+</head>
+<body>
+<main class="auth">
+  <form class="auth-card" method="post" novalidate>
+    {% csrf_token %}
+    <div class="brand"><span class="logo">Z</span>Zalo Tool</div>
+    <h1>Đổi mật khẩu</h1>
+    {% if form.non_field_errors %}<div class="alert">{{ form.non_field_errors|join:" " }}</div>{% endif %}
+    {% for field in form %}
+      <label class="f" for="{{ field.id_for_label }}">{{ field.label }}
+        {{ field }}
+        {{ field.errors }}
+      </label>
+    {% endfor %}
+    <p class="hint" style="margin:0">Mật khẩu mới cần ít nhất 6 ký tự.</p>
+    <button class="btn primary big" type="submit">Lưu mật khẩu mới</button>
+    <a class="btn" href="{% url 'trang-chu' %}" style="text-align:center">Quay lại</a>
+  </form>
+</main>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "zalo-tool",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "worker": "node src/worker.js",
+    "mau": "node src/tao-file-mau.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "xlsx": "^0.18.5",
+    "zca-js": "^2.2.0"
+  }
+}
