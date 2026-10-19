@@ -242,7 +242,7 @@ async function loadHistory() {
       <td class="msg-cell">${esc(h.noiDung)}</td>
       <td class="n">${h.soAnh || ""}</td>
       <td>${esc(h.taiKhoanZalo)}</td>
-      <td class="note" style="white-space:normal;max-width:220px">${esc(h.ghiChu)}</td>
+      <td><span class="note" style="white-space:normal;max-width:220px">${esc(h.ghiChu)}</span></td>
     </tr>`).join("");
     $("hEmpty").classList.toggle("hidden", rows.length > 0);
   } catch (e) { showError(e); }
