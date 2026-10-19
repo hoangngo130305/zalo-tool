@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from . import services as sv
-from .models import CaiDat, KetQua, LichSuGui, NguoiDung, NguoiNhan, NhatKy
+from .models import CaiDat, KetQua, LichSuGui, LichSuGuiNhom, NguoiDung, NguoiNhan, NhatKy
 
 
 # ---------- tài khoản ----------
@@ -343,14 +343,46 @@ class LichSuGuiAdmin(admin.ModelAdmin):
         return res
 
 
+@admin.register(LichSuGuiNhom)
+class LichSuGuiNhomAdmin(admin.ModelAdmin):
+    list_display = ("thoi_gian", "ten_nhom", "ket_qua_pill", "noi_dung_ngan", "so_anh", "nguoi_gui", "tai_khoan_zalo")
+    list_filter = ("ket_qua", "nguoi_gui", ("thoi_gian", admin.DateFieldListFilter))
+    search_fields = ("ten_nhom", "nhom_id", "noi_dung")
+    list_per_page = 100
+    readonly_fields = ("thoi_gian", "nhom_id", "ten_nhom", "ket_qua", "noi_dung", "so_anh", "ghi_chu", "nguoi_gui", "tai_khoan_zalo")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Kết quả", ordering="ket_qua")
+    def ket_qua_pill(self, obj):
+        if obj.thanh_cong:
+            return format_html('<span class="badge badge-success">Đã gửi</span>')
+        return format_html('<span class="badge badge-danger" title="{}">{}</span>', obj.ghi_chu, obj.ket_qua)
+
+    @admin.display(description="Nội dung đã gửi")
+    def noi_dung_ngan(self, obj):
+        return (obj.noi_dung[:60] + "…") if len(obj.noi_dung) > 60 else obj.noi_dung
+
+
 # ---------- cài đặt (1 dòng) ----------
 @admin.register(CaiDat)
 class CaiDatAdmin(admin.ModelAdmin):
     fieldsets = (
         ("Nội dung", {"fields": ("loi_moi_ket_ban", "noi_dung_tin_nhan")}),
         ("Gửi gì", {"fields": ("gui_ket_ban", "gui_tin_nhan")}),
+        ("Tên gợi nhớ khi kết bạn", {"fields": ("doi_ten_goi_nho", "mau_ten_goi_nho"),
+                                     "description": "Sau khi gửi lời mời kết bạn, tool đặt tên gợi nhớ cho người đó trong Zalo của người gửi."}),
         ("Giới hạn an toàn", {"fields": ("gioi_han_moi_lan", "cho_toi_thieu_giay", "cho_toi_da_giay"),
-                              "description": "Nên giữ 20–30 người mỗi ngày và chờ từ 60 giây trở lên để tránh bị Zalo khoá tài khoản."}),
+                              "description": "Nên giữ 20–30 người mỗi ngày và chờ từ 60 giây trở lên để tránh bị Zalo khoá tài khoản. "
+                                             "Thời gian chờ giữa 2 lần gửi được chọn ngẫu nhiên trong khoảng tối thiểu – tối đa, "
+                                             "áp dụng cho cả gửi từng người lẫn gửi vào nhóm."}),
+        ("Nghỉ giữa các lượt", {"fields": ("nghi_sau_so_lan", "nghi_phut"),
+                                "description": "Ví dụ: 5 lần và 15 phút = cứ gửi xong 5 người (hoặc 5 nhóm) thì nghỉ 15 phút rồi gửi tiếp. "
+                                               "Để 0 lần là không nghỉ."}),
     )
 
     def has_add_permission(self, request):

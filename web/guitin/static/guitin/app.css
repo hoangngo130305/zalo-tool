@@ -206,3 +206,13 @@ td textarea.msg::placeholder { color: var(--muted); font-style: italic; }
 #zaloCard .dot { width: 11px; height: 11px; }
 #zaloCard .qr-box img { width: 220px; height: 220px; }
 .pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding: 10px 16px; font-size: 13px; }
+
+/* Gửi tin vào nhóm */
+th.n, td.n { text-align: right; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; }
+input.search { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 5px 9px; font: inherit; color: inherit; min-width: 180px; }
+input.search:focus { border-color: var(--accent); outline: none; }
+td input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--accent); }
+.thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 8px; }
+.thumb { margin: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface-2); display: flex; flex-direction: column; }
+.thumb img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.thumb .btn { border-radius: 0; border-width: 1px 0 0; }

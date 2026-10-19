@@ -1,4 +1,4 @@
-Django==5.1.4
+Django==5.2.18
 mysqlclient==2.2.6
 django-jazzmin==3.0.1
 openpyxl==3.1.5

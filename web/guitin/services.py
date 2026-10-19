@@ -77,6 +77,15 @@ def dien(tpl, ten):
     return re.sub(r"\{ten\}", lambda m: ten or "bạn", tpl or "", flags=re.IGNORECASE).strip()
 
 
+def ten_goi_nho(tpl, ten, sdt):
+    """Tên gợi nhớ đặt cho người được mời kết bạn (giống worker): {ten} {sdt}, không có tên thì chỉ còn SĐT."""
+    import re
+    s = re.sub(r"\{ten\}", lambda m: ten or "", tpl or "{ten} {sdt}", flags=re.IGNORECASE)
+    s = re.sub(r"\{sdt\}", lambda m: sdt or "", s, flags=re.IGNORECASE)
+    # Bỏ dấu nối thừa ở hai đầu khi thiếu tên, vd "{ten} - {sdt}" -> "0901234567"
+    return " ".join(s.split()).strip(" -–|,.:")[:60] or sdt
+
+
 def noi_dung_gui(r, cfg):
     """Nội dung tin nhắn sẽ gửi cho 1 người, theo thứ tự ưu tiên:
     nội dung riêng của dòng -> tin nhắn mặc định của nhân viên phụ trách -> nội dung mặc định của quản trị."""
@@ -318,3 +327,64 @@ def excel_lich_su(qs):
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+# ---------- gửi vào nhóm Zalo ----------
+ANH_TOI_DA = 10
+ANH_TOI_DA_MB = 5
+
+
+def thu_muc_anh(user):
+    """Ảnh gửi nhóm của từng tài khoản: data/anh-gui-nhom/<id>/ (worker đọc cùng thư mục này)."""
+    from django.conf import settings
+    return settings.ROOT_DIR / "data" / "anh-gui-nhom" / str(int(user.id))
+
+
+def loai_anh(data):
+    """Đuôi file theo nội dung ảnh (jpg/png/webp), None nếu không phải ảnh hỗ trợ."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "jpg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def luu_anh(user, cau_hinh, f):
+    """Lưu 1 ảnh tải lên vào thư mục của người dùng và thêm vào cấu hình gửi nhóm."""
+    import uuid
+    if len(cau_hinh.anh) >= ANH_TOI_DA:
+        raise ValueError(f"Tối đa {ANH_TOI_DA} ảnh mỗi lần gửi")
+    if f.size > ANH_TOI_DA_MB * 1024 * 1024:
+        raise ValueError(f"Ảnh “{f.name}” lớn hơn {ANH_TOI_DA_MB} MB")
+    data = f.read()
+    ext = loai_anh(data)
+    if not ext:
+        raise ValueError(f"“{f.name}” không phải ảnh JPG, PNG hoặc WEBP")
+    thu_muc = thu_muc_anh(user)
+    thu_muc.mkdir(parents=True, exist_ok=True)
+    ten = f"{uuid.uuid4().hex}.{ext}"
+    (thu_muc / ten).write_bytes(data)
+    cau_hinh.anh = [*cau_hinh.anh, ten]
+    cau_hinh.save(update_fields=["anh", "cap_nhat"])
+
+
+def xoa_anh(user, cau_hinh, ten):
+    if ten not in cau_hinh.anh:
+        raise ValueError("Không tìm thấy ảnh")
+    cau_hinh.anh = [a for a in cau_hinh.anh if a != ten]
+    cau_hinh.save(update_fields=["anh", "cap_nhat"])
+    (thu_muc_anh(user) / ten).unlink(missing_ok=True)
+
+
+def cau_hinh_nhom_dict(c):
+    return {"noiDung": c.noi_dung, "nhom": c.nhom, "anh": c.anh}
+
+
+def lich_su_nhom_dict(h):
+    return {
+        "id": h.id, "nhomId": h.nhom_id, "tenNhom": h.ten_nhom, "ketQua": h.ket_qua, "thanhCong": h.thanh_cong,
+        "noiDung": h.noi_dung, "soAnh": h.so_anh, "ghiChu": h.ghi_chu, "taiKhoanZalo": h.tai_khoan_zalo,
+        "thoiGian": localtime(h.thoi_gian).strftime("%H:%M:%S %d/%m/%Y"), "nguoiGui": str(h.nguoi_gui or ""),
+    }

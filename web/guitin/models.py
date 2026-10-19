@@ -198,6 +198,15 @@ class CaiDat(models.Model):
     cho_toi_thieu_giay = models.PositiveIntegerField("Chờ tối thiểu (giây)", default=60, validators=[MinValueValidator(30)],
                                                       help_text="Không cho dưới 30 giây để tránh bị Zalo khoá tài khoản.")
     cho_toi_da_giay = models.PositiveIntegerField("Chờ tối đa (giây)", default=150, validators=[MinValueValidator(30)])
+    nghi_sau_so_lan = models.PositiveSmallIntegerField(
+        "Nghỉ sau mỗi (lần gửi)", default=0, validators=[MaxValueValidator(1000)],
+        help_text="Cứ gửi được số lần này thì nghỉ một lúc lâu hơn. Để 0 là không nghỉ.")
+    nghi_phut = models.PositiveSmallIntegerField("Thời gian nghỉ (phút)", default=10,
+                                                 validators=[MinValueValidator(1), MaxValueValidator(240)])
+    doi_ten_goi_nho = models.BooleanField("Đổi tên gợi nhớ khi kết bạn", default=True,
+                                          help_text="Đặt tên gợi nhớ (biệt danh) cho người được mời kết bạn, để dễ tìm lại trong Zalo.")
+    mau_ten_goi_nho = models.CharField("Mẫu tên gợi nhớ", max_length=100, default="{ten} {sdt}",
+                                       help_text="{ten} = họ tên trong danh sách, {sdt} = số điện thoại. Ví dụ: “{ten} {sdt}” → “Anh Nam 0901234567”.")
 
     class Meta:
         verbose_name = "cài đặt gửi tin"
@@ -213,6 +222,8 @@ class CaiDat(models.Model):
         self.gioi_han_moi_lan = min(50, max(1, int(self.gioi_han_moi_lan or 20)))
         self.cho_toi_thieu_giay = max(30, int(self.cho_toi_thieu_giay or 60))
         self.cho_toi_da_giay = max(self.cho_toi_thieu_giay, int(self.cho_toi_da_giay or 150))
+        self.nghi_sau_so_lan = min(1000, max(0, int(self.nghi_sau_so_lan or 0)))
+        self.nghi_phut = min(240, max(1, int(self.nghi_phut or 10)))
         super().save(*args, **kwargs)
 
     @classmethod
@@ -225,10 +236,58 @@ class CaiDat(models.Model):
             "guiKetBan": self.gui_ket_ban, "guiTinNhan": self.gui_tin_nhan,
             "gioiHanMoiLan": self.gioi_han_moi_lan,
             "choToiThieuGiay": self.cho_toi_thieu_giay, "choToiDaGiay": self.cho_toi_da_giay,
+            "nghiSauSoLan": self.nghi_sau_so_lan, "nghiPhut": self.nghi_phut,
+            "doiTenGoiNho": self.doi_ten_goi_nho, "mauTenGoiNho": self.mau_ten_goi_nho,
         }
 
     def __str__(self):
         return "Cài đặt gửi tin"
+
+
+# ---------- gửi vào nhóm Zalo ----------
+class CauHinhNhom(models.Model):
+    """Cấu hình gửi nhóm của từng người: các nhóm đích, nội dung và ảnh đính kèm."""
+    nguoi_dung = models.OneToOneField(NguoiDung, verbose_name="Tài khoản", on_delete=models.CASCADE, related_name="cau_hinh_nhom")
+    noi_dung = models.TextField("Nội dung", blank=True)
+    nhom = models.JSONField("Nhóm đích", default=list, blank=True, help_text="[{id, ten}]")
+    anh = models.JSONField("Ảnh đính kèm", default=list, blank=True, help_text="Tên file trong data/anh-gui-nhom/<id tài khoản>/")
+    cap_nhat = models.DateTimeField("Cập nhật lúc", auto_now=True)
+
+    class Meta:
+        verbose_name = "cấu hình gửi nhóm"
+        verbose_name_plural = "Cấu hình gửi nhóm"
+
+    @classmethod
+    def cua(cls, user):
+        return cls.objects.get_or_create(nguoi_dung=user)[0]
+
+    def __str__(self):
+        return f"Gửi nhóm của {self.nguoi_dung}"
+
+
+class LichSuGuiNhom(models.Model):
+    nhom_id = models.CharField("ID nhóm", max_length=64, db_index=True)
+    ten_nhom = models.CharField("Tên nhóm", max_length=255, blank=True)
+    ket_qua = models.CharField("Kết quả", max_length=20)
+    noi_dung = models.TextField("Nội dung đã gửi", blank=True)
+    so_anh = models.PositiveSmallIntegerField("Số ảnh", default=0)
+    tai_khoan_zalo = models.CharField("Gửi từ Zalo", max_length=255, blank=True)
+    ghi_chu = models.TextField("Ghi chú", blank=True)
+    thoi_gian = models.DateTimeField("Thời gian gửi", db_index=True)
+    nguoi_gui = models.ForeignKey(NguoiDung, verbose_name="Người gửi", null=True, blank=True,
+                                  on_delete=models.SET_NULL, related_name="lich_su_gui_nhom")
+
+    class Meta:
+        verbose_name = "lịch sử gửi nhóm"
+        verbose_name_plural = "Lịch sử gửi nhóm"
+        ordering = ["-thoi_gian", "-id"]
+
+    @property
+    def thanh_cong(self):
+        return self.ket_qua == "Đã gửi"
+
+    def __str__(self):
+        return f"{self.ten_nhom or self.nhom_id} lúc {self.thoi_gian:%d/%m/%Y %H:%M}"
 
 
 # ---------- nhật ký ----------

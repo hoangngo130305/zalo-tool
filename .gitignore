@@ -15,3 +15,4 @@ data/zalo-sessions/
 # File cũ trước khi chuyển sang MySQL (có phiên đăng nhập Zalo)
 data/da-chuyen-sang-mysql/
 session.json
+data/anh-gui-nhom/

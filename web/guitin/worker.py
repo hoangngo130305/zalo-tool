@@ -33,7 +33,8 @@ def goi(method, path, body=None, timeout=8):
 
 
 OFFLINE = {"login": "out", "account": None, "qr": None, "running": False, "runBy": None,
-           "stopRequested": False, "current": None, "progress": None, "waitUntil": None}
+           "stopRequested": False, "current": None, "progress": None, "waitUntil": None,
+           "kind": None, "waitBreak": False}
 
 
 def trang_thai(uid):

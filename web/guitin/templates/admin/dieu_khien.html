@@ -94,6 +94,7 @@
           <hr>
           <div class="zt-log" id="ztLog" aria-live="polite"></div>
           <div class="mt-2 d-flex flex-wrap" style="gap:8px">
+            {% if co_quyen_gui %}<a class="btn btn-primary btn-sm" href="{% url 'gui-nhom' %}"><i class="fas fa-users"></i> Gửi tin vào nhóm Zalo</a>{% endif %}
             <a class="btn btn-outline-primary btn-sm" href="/api/lich-su/excel"><i class="fas fa-file-excel"></i> Xuất Excel lịch sử gửi</a>
             <a class="btn btn-outline-secondary btn-sm" href="{% url 'admin:guitin_lichsugui_changelist' %}"><i class="fas fa-history"></i> Lịch sử gửi</a>
             <a class="btn btn-outline-secondary btn-sm" href="{% url 'admin:guitin_caidat_changelist' %}"><i class="fas fa-sliders-h"></i> Nội dung tin & cài đặt</a>
@@ -226,8 +227,11 @@
       $("sCount").textContent = `${st.progress.i}/${st.progress.total}`;
       $("sBar").style.width = `${(st.progress.i / st.progress.total) * 100}%`;
       const who = st.runBy?.name || "";
-      if (st.current) $("sNow").textContent = `${who} đang gửi ${st.current}`;
-      else if (st.waitUntil) $("sNow").textContent = st.stopRequested ? "Đang dừng..." : `${who}: chờ ${Math.max(0, Math.round((st.waitUntil - Date.now()) / 1000))} giây trước người tiếp theo`;
+      const s = Math.max(0, Math.round((st.waitUntil - Date.now()) / 1000));
+      if (st.current) $("sNow").textContent = `${who} đang gửi ${st.kind === "nhom" ? `vào nhóm “${st.current}”` : st.current}`;
+      else if (st.waitUntil) $("sNow").textContent = st.stopRequested ? "Đang dừng..."
+        : st.waitBreak ? `${who}: đang nghỉ giữa lượt, còn ${Math.floor(s / 60)} phút ${s % 60} giây`
+        : `${who}: chờ ${s} giây trước lần gửi tiếp theo`;
     }
     if ($("sStop")) { $("sStop").disabled = !!st.stopRequested; $("sStop").textContent = st.stopRequested ? "Đang dừng..." : "Dừng"; }
     $("sHint").textContent = st.login !== "in" ? "Bạn chưa kết nối Zalo. Kết nối ở khung “Zalo của tôi” bên trái trước khi gửi." : "Bạn chưa có đợt gửi nào đang chạy. Theo dõi nhân viên ở bảng “Theo nhân viên” bên dưới.";

@@ -8,7 +8,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import {
   ROOT, sanitizeConfig, newZalo, hasZaloSession, clearZaloSession, savedSessionIds,
-  loginWithSession, loginWithQR, runBatch, sleep,
+  loginWithSession, loginWithQR, runBatch, sleep, processGroup, listGroups, loadAttachments,
 } from "./core.js";
 
 const conf = JSON.parse(fs.readFileSync(path.join(ROOT, "config.json"), "utf8"));
@@ -35,11 +35,13 @@ function acc(uid) {
       qr: null,               // ảnh QR dạng data URL
       qrActions: null,
       running: false,
+      kind: null,             // "ca-nhan" (kết bạn + nhắn từng người) | "nhom" (gửi vào nhóm)
       runBy: null,            // { id, name } người bấm gửi
       stopRequested: false,
       current: null,          // SĐT đang gửi
       progress: null,         // { i, total }
       waitUntil: null,
+      waitBreak: false,       // đang nghỉ dài sau mỗi X lần gửi
       pending: [],            // các SĐT còn lại trong đợt gửi (để không gửi trùng với người khác)
     });
   }
@@ -126,9 +128,55 @@ function logoutZalo(a) {
 }
 
 // ---------- gửi ----------
-function startRun(a, { batch, cfg, runBy }) {
+// Chạy 1 đợt cho tài khoản a: items là danh sách người / nhóm, task xử lý từng mục
+function launch(a, { kind, items, cfg, runBy, task, label, keyOf, onResult }) {
+  Object.assign(a, {
+    running: true, kind, runBy: runBy || null, stopRequested: false,
+    progress: { i: 0, total: items.length }, pending: kind === "ca-nhan" ? items.map((r) => r.sdt) : [],
+  });
+  const nghi = cfg.nghiSauSoLan ? ` Cứ ${cfg.nghiSauSoLan} lần gửi nghỉ ${cfg.nghiPhut} phút.` : "";
+  log(a, `${runBy?.name || "Ai đó"} bắt đầu gửi cho ${items.length} ${label} bằng Zalo ${a.account}.${nghi}`, "ok");
+
+  // Chờ theo từng nhịp ngắn để nút Dừng có hiệu lực ngay
+  const wait = async (ms) => {
+    const end = Date.now() + ms;
+    while (Date.now() < end && !a.stopRequested) await sleep(500);
+  };
+
+  runBatch({
+    api: a.api, cfg, batch: items, task,
+    shouldStop: () => a.stopRequested,
+    wait,
+    onStart: (row, i, n) => {
+      Object.assign(a, { current: keyOf(row), waitUntil: null, waitBreak: false, progress: { i, total: n } });
+      log(a, `(${i + 1}/${n}) Đang gửi ${keyOf(row, true)}`);
+    },
+    onResult: async (row, res, i, n) => {
+      Object.assign(a, { current: null, progress: { i: i + 1, total: n } });
+      if (kind === "ca-nhan") a.pending = a.pending.filter((s) => s !== row.sdt);
+      await onResult(row, res);
+    },
+    onWait: (ms, nghi) => {
+      Object.assign(a, { waitUntil: Date.now() + ms, waitBreak: !!nghi });
+      log(a, nghi ? `Đã gửi ${cfg.nghiSauSoLan} lần, nghỉ ${Math.round(ms / 60000)} phút rồi gửi tiếp...`
+        : `Chờ ${Math.round(ms / 1000)} giây trước lần gửi tiếp theo...`, nghi ? "warn" : "info");
+    },
+  })
+    .then((r) => log(a, r.stopped ? `Đã dừng sau ${r.sent} ${label}.` : "Hoàn tất đợt gửi.", r.stopped ? "warn" : "ok"))
+    .catch((e) => log(a, `Lỗi khi gửi: ${e.message}`, "error"))
+    .finally(() => Object.assign(a, {
+      running: false, kind: null, runBy: null, stopRequested: false, current: null, waitUntil: null, waitBreak: false, pending: [],
+    }));
+}
+
+function canRun(a) {
   if (a.running) throw new Error("Bạn đang có một đợt gửi chưa xong");
   if (!a.api) throw new Error("Chưa kết nối Zalo. Quét QR để kết nối Zalo của bạn trước khi gửi");
+}
+
+// Kết bạn + nhắn tin từng người
+function startRun(a, { batch, cfg, runBy }) {
+  canRun(a);
   cfg = sanitizeConfig(cfg);
   if (!cfg.guiKetBan && !cfg.guiTinNhan) throw new Error("Đang tắt cả kết bạn lẫn tin nhắn");
   // Số đang được tài khoản khác gửi thì bỏ qua để không ai nhận 2 lần
@@ -139,48 +187,56 @@ function startRun(a, { batch, cfg, runBy }) {
     .map((r) => ({ sdt: String(r.sdt), ten: String(r.ten ?? ""), noiDung: String(r.noiDung ?? "").slice(0, 5000) }));
   if (!batch.length) throw new Error("Không có số nào để gửi (các số còn lại đang được người khác gửi)");
 
-  Object.assign(a, {
-    running: true, runBy: runBy || null, stopRequested: false,
-    progress: { i: 0, total: batch.length }, pending: batch.map((r) => r.sdt),
-  });
-  log(a, `${runBy?.name || "Ai đó"} bắt đầu gửi cho ${batch.length} người bằng Zalo ${a.account}.`, "ok");
-
-  // Chờ theo từng nhịp ngắn để nút Dừng có hiệu lực ngay
-  const wait = async (ms) => {
-    const end = Date.now() + ms;
-    while (Date.now() < end && !a.stopRequested) await sleep(500);
-  };
-
-  runBatch({
-    api: a.api, cfg, batch,
-    shouldStop: () => a.stopRequested,
-    wait,
-    onStart: (row, i, n) => {
-      Object.assign(a, { current: row.sdt, waitUntil: null, progress: { i, total: n } });
-      log(a, `(${i + 1}/${n}) Đang gửi ${row.sdt} - ${row.ten || "không tên"}`);
-    },
-    onResult: async (row, res, i, n) => {
-      Object.assign(a, { current: null, progress: { i: i + 1, total: n } });
-      a.pending = a.pending.filter((s) => s !== row.sdt);
+  launch(a, {
+    kind: "ca-nhan", items: batch, cfg, runBy, label: "người",
+    keyOf: (r, long) => (long ? `${r.sdt} - ${r.ten || "không tên"}` : r.sdt),
+    onResult: async (row, res) => {
       // Lưu kết quả là quan trọng nhất: thử lại nhiều lần
       await report("result", { sdt: row.sdt, ketQua: { ...res, taiKhoanZalo: a.account }, nguoiGuiId: runBy?.id ?? a.uid }, 8);
       const bad = res.ketBan === "Lỗi" || res.tinNhan === "Lỗi";
-      log(a, `${row.sdt}: kết bạn ${res.ketBan}, tin nhắn ${res.tinNhan}${res.ghiChu ? ` (${res.ghiChu})` : ""}`, bad ? "error" : "ok");
+      const ten = res.tenGoiNho ? `, tên gợi nhớ “${res.tenGoiNho}”` : "";
+      log(a, `${row.sdt}: kết bạn ${res.ketBan}${ten}, tin nhắn ${res.tinNhan}${res.ghiChu ? ` (${res.ghiChu})` : ""}`, bad ? "error" : "ok");
     },
-    onWait: (ms) => {
-      a.waitUntil = Date.now() + ms;
-      log(a, `Chờ ${Math.round(ms / 1000)} giây trước người tiếp theo...`);
+  });
+}
+
+// Gửi cùng một nội dung (kèm ảnh) vào các nhóm Zalo đã chọn
+const MAX_NHOM = 100;
+function startGroupRun(a, { groups, noiDung, anh, cfg, runBy }) {
+  canRun(a);
+  cfg = sanitizeConfig(cfg);
+  const items = (Array.isArray(groups) ? groups : [])
+    .filter((g) => g && /^\d+$/.test(String(g.id)))
+    .slice(0, MAX_NHOM)
+    .map((g) => ({ id: String(g.id), ten: String(g.ten ?? g.id).slice(0, 255) }));
+  if (!items.length) throw new Error("Chưa chọn nhóm nào");
+  const job = { noiDung: String(noiDung ?? "").trim().slice(0, 5000), attachments: loadAttachments(Array.isArray(anh) ? anh.slice(0, 10) : []) };
+  if (!job.noiDung && !job.attachments.length) throw new Error("Chưa có nội dung hay ảnh để gửi");
+
+  launch(a, {
+    kind: "nhom", items, cfg, runBy, label: "nhóm",
+    task: (api, g) => processGroup(api, g, job),
+    keyOf: (g, long) => (long ? `nhóm “${g.ten}”` : g.ten),
+    onResult: async (g, res) => {
+      await report("result_nhom", { nhomId: g.id, ketQua: { ...res, taiKhoanZalo: a.account }, nguoiGuiId: runBy?.id ?? a.uid }, 8);
+      log(a, `Nhóm “${g.ten}”: ${res.ketQua}${res.ghiChu ? ` (${res.ghiChu})` : ""}`, res.ketQua === "Lỗi" ? "error" : "ok");
     },
-  })
-    .then((r) => log(a, r.stopped ? `Đã dừng sau ${r.sent} người.` : "Hoàn tất đợt gửi.", r.stopped ? "warn" : "ok"))
-    .catch((e) => log(a, `Lỗi khi gửi: ${e.message}`, "error"))
-    .finally(() => Object.assign(a, { running: false, runBy: null, stopRequested: false, current: null, waitUntil: null, pending: [] }));
+  });
+}
+
+async function groupsOf(a) {
+  if (!a.api) throw new Error("Chưa kết nối Zalo. Quét QR để kết nối Zalo của bạn trước");
+  try {
+    return { groups: await listGroups(a.api) };
+  } catch (e) {
+    throw new Error(`Không lấy được danh sách nhóm: ${e.message}`);
+  }
 }
 
 function stopRun(a) {
   if (a.running && !a.stopRequested) {
     a.stopRequested = true;
-    log(a, "Đang dừng... sẽ dừng sau người hiện tại.", "warn");
+    log(a, "Đang dừng... sẽ dừng sau lần gửi hiện tại.", "warn");
   }
 }
 
@@ -214,6 +270,8 @@ const routes = {
   "POST /login/cancel": (q, b) => (cancelLogin(acc(b.uid)), { ok: true }),
   "POST /logout": (q, b) => (logoutZalo(acc(b.uid)), { ok: true }),
   "POST /run": (q, b) => (startRun(acc(b.uid), b), { ok: true }),
+  "GET /groups": (q) => groupsOf(acc(q.get("uid"))),
+  "POST /run-groups": (q, b) => (startGroupRun(acc(b.uid), b), { ok: true }),
   "POST /stop": (q, b) => (stopRun(acc(b.uid)), { ok: true }),
 };
 

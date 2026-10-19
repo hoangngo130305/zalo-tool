@@ -59,6 +59,20 @@ từ tài khoản Zalo nào. Nhân viên chỉ dừng được đợt gửi củ
 Nội dung tin nhắn mỗi người được chọn theo thứ tự: **nội dung riêng của dòng** → **tin nhắn gửi hàng loạt
 của nhân viên** → **nội dung mặc định của quản trị** (/admin/ → Cài đặt gửi tin). Lời mời kết bạn do quản trị soạn.
 
+### Gửi tin vào nhóm Zalo
+Trang **/gui-nhom/** (nhân viên: tab **Gửi vào nhóm Zalo**; quản trị: nút trên bảng điều khiển hoặc menu trên cùng).
+1. Kết nối Zalo của mình, bấm **Tải danh sách nhóm**, tick các nhóm muốn gửi (lựa chọn được lưu lại).
+2. Soạn nội dung, **+ Thêm ảnh** (JPG/PNG/WEBP, tối đa 10 ảnh, mỗi ảnh ≤ 5 MB). Một ảnh thì nội dung làm chú thích ảnh,
+   nhiều ảnh thì gửi nội dung trước rồi gửi ảnh.
+3. Bấm **Gửi vào các nhóm đã chọn** → **Xác nhận**. Kết quả xem ở bảng **Lịch sử gửi nhóm** (quản trị: /admin/ → Lịch sử gửi nhóm).
+
+### Thời gian chờ, nghỉ giữa lượt, tên gợi nhớ (/admin/ → Cài đặt gửi tin)
+- **Chờ tối thiểu / tối đa**: thời gian chờ ngẫu nhiên giữa 2 lần gửi (gửi từng người và gửi nhóm).
+- **Nghỉ sau mỗi X lần gửi, nghỉ Y phút**: ví dụ 5 và 15 = cứ gửi xong 5 người (hoặc 5 nhóm) thì nghỉ 15 phút. 0 = không nghỉ.
+- **Đổi tên gợi nhớ khi kết bạn**: sau khi gửi lời mời, tool đặt tên gợi nhớ theo mẫu (mặc định `{ten} {sdt}`,
+  vd “Anh Nam 0901234567”). Zalo có thể không cho đổi tên người chưa là bạn, khi đó lỗi được ghi ở cột Ghi chú,
+  tin nhắn vẫn gửi bình thường.
+
 ### Tài khoản
 - Sai mật khẩu 5 lần sẽ bị khoá đăng nhập 5 phút.
 - Khoá tài khoản: /admin/ → Tài khoản → bỏ chọn “Hoạt động”. Xoá tài khoản thì các số người đó

@@ -1,0 +1,141 @@
+{% load static %}<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gửi tin vào nhóm – Zalo Tool</title>
+<link rel="stylesheet" href="{% static 'guitin/app.css' %}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="logo">Z</span>Zalo Tool</div>
+    {% if me.staff %}
+    <a class="btn sm link" href="{% url 'admin:index' %}">‹ Bảng điều khiển</a>
+    {% else %}
+    <a class="btn sm link" href="{% url 'trang-chu' %}">‹ Gửi tin từng người</a>
+    {% endif %}
+    <div class="spacer"></div>
+    <div class="acct"><span class="dot" id="acctDot"></span><span id="acctText">Zalo: đang kiểm tra...</span></div>
+    <div class="me">
+      <span>{{ me.name }}</span><span class="role {{ me.role }}">{{ me.roleLabel }}</span>
+      <a class="btn sm link" href="{% url 'doi-mat-khau' %}">Đổi mật khẩu</a>
+      <form class="inline" method="post" action="{% url 'dang-xuat' %}">{% csrf_token %}<button class="btn sm link" type="submit">Thoát</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="alert hidden" id="connAlert">Mất kết nối tới Zalo Tool. Kiểm tra máy chạy tool còn bật không, hoặc tải lại trang.</div>
+  <div class="alert hidden" id="workerAlert">Phần gửi Zalo đang tắt nên chưa gửi được tin. Báo quản trị viên kiểm tra.</div>
+
+  <div class="main">
+    <div class="col">
+      <section class="card">
+        <div class="card-h"><span class="num">1</span><h2>Chọn nhóm nhận tin</h2><span class="saved" id="groupSaved"></span></div>
+        <div class="card-b">
+          <div class="toolbar">
+            <button class="btn sm primary" id="btnLoadGroups">Tải danh sách nhóm</button>
+            <input type="search" class="search" id="groupSearch" placeholder="Tìm nhóm..." aria-label="Tìm nhóm">
+            <div class="spacer"></div>
+            <button class="btn sm" id="btnSelectAll">Chọn tất cả</button>
+            <button class="btn sm" id="btnSelectNone">Bỏ chọn hết</button>
+          </div>
+          <p class="hint" id="groupHint">Bấm <b>Tải danh sách nhóm</b> để lấy các nhóm mà Zalo của bạn đang tham gia, rồi tick các nhóm muốn gửi. Lựa chọn được lưu lại cho lần sau.</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th style="width:36px"></th><th>Tên nhóm</th><th class="n">Thành viên</th></tr></thead>
+            <tbody id="groupBody"></tbody>
+          </table>
+          <div class="empty hidden" id="groupEmpty"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-h"><span class="num">2</span><h2>Nội dung &amp; hình ảnh</h2><span class="saved" id="msgSaved"></span></div>
+        <div class="card-b">
+          <label class="f" for="msg">
+            <span class="row">Nội dung tin nhắn <span class="count" id="msgCount"></span></span>
+            <textarea id="msg" rows="6" maxlength="5000" placeholder="Soạn nội dung gửi vào các nhóm đã chọn..."></textarea>
+          </label>
+          <div>
+            <div class="row">
+              <b style="font-size:13px">Hình ảnh đính kèm</b>
+              <span class="count" id="imgCount"></span>
+            </div>
+            <div class="thumbs" id="thumbs"></div>
+            <div class="row" style="margin-top:8px">
+              <button class="btn sm" id="btnAddImg">+ Thêm ảnh</button>
+              <input type="file" id="imgInput" accept="image/jpeg,image/png,image/webp" multiple class="hidden">
+              <span class="hint">JPG, PNG hoặc WEBP. Một ảnh thì nội dung đi kèm làm chú thích ảnh; nhiều ảnh thì gửi nội dung trước rồi gửi ảnh.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="card">
+        <div class="card-h"><h2>Zalo của tôi</h2><span class="saved" id="zState"></span></div>
+        <div class="card-b">
+          <div class="row"><span class="dot" id="zDot"></span><b id="zAccount">Chưa kết nối</b></div>
+          <div class="qr-box hidden" id="zQrBox">
+            <img id="zQr" alt="Mã QR đăng nhập Zalo">
+            <ol class="steps">
+              <li>Mở app <b>Zalo</b> trên điện thoại <b>của bạn</b>.</li>
+              <li>Bấm biểu tượng <b>quét QR</b> ở góc trên, quét mã này.</li>
+              <li>Bấm <b>Đăng nhập</b> trên điện thoại để xác nhận.</li>
+            </ol>
+          </div>
+          <div class="row">
+            <button class="btn primary" id="zConnect">Kết nối Zalo của tôi</button>
+            <button class="btn hidden" id="zCancel">Huỷ</button>
+          </div>
+          <p class="hint" style="margin:0">Tin nhắn được gửi vào nhóm <b>từ tài khoản Zalo này</b>, nên chỉ thấy các nhóm mà tài khoản này đang tham gia.</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-h"><span class="num">3</span><h2>Gửi tự động</h2></div>
+        <div class="card-b">
+          <div class="preview"><span class="lbl">Cài đặt thời gian (do quản trị đặt)</span><span id="timing"></span></div>
+          <div class="run-btns">
+            <button class="btn primary big" id="btnStart">Gửi vào các nhóm đã chọn</button>
+            <button class="btn danger solid big hidden" id="btnStop">Dừng</button>
+          </div>
+          <div class="hint" id="runHint"></div>
+          <div class="confirm hidden" id="confirmBox">
+            <div id="confirmText"></div>
+            <div class="row">
+              <button class="btn primary sm" id="btnConfirm">Xác nhận gửi</button>
+              <button class="btn sm" id="btnCancelConfirm">Huỷ</button>
+            </div>
+          </div>
+          <div class="hidden" id="runBox">
+            <div class="run-status"><span id="runNow">Đang chuẩn bị...</span><b id="runCount">0/0</b></div>
+            <div class="progress"><div id="runBar"></div></div>
+          </div>
+          <div class="log" id="log" aria-live="polite"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <section class="card">
+    <div class="card-h"><h2>Lịch sử gửi nhóm</h2><span class="saved">100 lần gần nhất</span></div>
+    <div class="table-wrap">
+      <table class="hist">
+        <thead><tr><th>Thời gian</th><th>Nhóm</th><th>Kết quả</th><th>Nội dung</th><th class="n">Ảnh</th><th>Gửi từ Zalo</th><th>Ghi chú</th></tr></thead>
+        <tbody id="hBody"></tbody>
+      </table>
+      <div class="empty hidden" id="hEmpty">Chưa gửi vào nhóm nào.</div>
+    </div>
+  </section>
+</main>
+
+{{ me|json_script:"me-data" }}
+<script src="{% static 'guitin/gui_nhom.js' %}"></script>
+</body>
+</html>

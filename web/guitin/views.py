@@ -19,7 +19,7 @@ from django.views.decorators.http import require_http_methods
 from . import services as sv
 from . import worker
 from .auth import con_bi_khoa
-from .models import CaiDat, KetQua, LichSuGui, NguoiDung, NhatKy, chuan_hoa_sdt
+from .models import CaiDat, CauHinhNhom, KetQua, LichSuGui, LichSuGuiNhom, NguoiDung, NhatKy, chuan_hoa_sdt
 
 
 # ---------- trang ----------
@@ -176,6 +176,7 @@ def api_preview(request):
     return {"items": [{
         "sdt": r.sdt, "ten": r.ten,
         "loiMoi": sv.dien(cfg.loi_moi_ket_ban, r.ten) if cfg.gui_ket_ban else None,
+        "tenGoiNho": sv.ten_goi_nho(cfg.mau_ten_goi_nho, r.ten, r.sdt) if cfg.doi_ten_goi_nho else None,
         "tinNhan": sv.noi_dung_gui(r, cfg) if cfg.gui_tin_nhan else None,
     } for r in items]}
 
@@ -399,4 +400,123 @@ def api_worker_event(request):
             KetQua.objects.update_or_create(sdt=sdt, defaults=du_lieu)
             LichSuGui.objects.create(sdt=sdt, **du_lieu)
             sv.tang_phien_ban()
+    elif b.get("type") == "result_nhom":
+        r = b.get("ketQua") or {}
+        try:
+            tg = datetime.fromisoformat(str(r.get("thoiGian")).replace("Z", "+00:00"))
+        except ValueError:
+            tg = timezone.now()
+        LichSuGuiNhom.objects.create(
+            nhom_id=str(b.get("nhomId") or "")[:64], ten_nhom=str(r.get("tenNhom") or "")[:255],
+            ket_qua=str(r.get("ketQua") or "-")[:20], noi_dung=str(r.get("noiDung") or ""),
+            so_anh=max(0, int(r.get("soAnh") or 0)), ghi_chu=str(r.get("ghiChu") or ""), thoi_gian=tg,
+            tai_khoan_zalo=str(r.get("taiKhoanZalo") or "")[:255],
+            nguoi_gui=NguoiDung.objects.filter(id=b.get("nguoiGuiId")).first(),
+        )
+        sv.tang_phien_ban()
     return JsonResponse({"ok": True})
+
+
+# ---------- gửi vào nhóm Zalo ----------
+@login_required
+def trang_gui_nhom(request):
+    """Trang gửi tin vào nhóm Zalo, dùng chung cho quản trị và nhân viên (gửi bằng Zalo của chính mình)."""
+    u = request.user
+    if not u.co_quyen("send"):
+        raise PermissionDenied
+    me = {"id": u.id, "name": str(u), "role": u.vai_tro, "roleLabel": u.get_vai_tro_display(), "staff": u.is_staff}
+    return render(request, "guitin/gui_nhom.html", {"me": me})
+
+
+@api("send", ["GET"])
+def api_nhom_state(request):
+    c = CauHinhNhom.cua(request.user)
+    logs = list(nhat_ky_cho(request.user).filter(nguoi_dung=request.user).order_by("-id")[:200])
+    return {**trang_thai_cho(request.user), "config": CaiDat.lay().to_dict(), "cauHinh": sv.cau_hinh_nhom_dict(c),
+            "anhToiDa": sv.ANH_TOI_DA, "anhToiDaMb": sv.ANH_TOI_DA_MB,
+            "logs": [sv.log_dict(n) for n in reversed(logs)], "version": sv.phien_ban()}
+
+
+@api("send", ["GET"])
+def api_nhom_danh_sach(request):
+    """Các nhóm Zalo mà tài khoản Zalo của mình đang tham gia."""
+    return worker.goi("GET", f"/groups?uid={request.user.id}", timeout=60)
+
+
+@api("send", ["POST"])
+def api_nhom_cau_hinh(request):
+    """Lưu nhóm đích và nội dung gửi nhóm."""
+    can_khong_dang_gui(request.user)
+    c = CauHinhNhom.cua(request.user)
+    b = request.json
+    if "noiDung" in b:
+        c.noi_dung = str(b.get("noiDung") or "").strip()[:5000]
+    if "nhom" in b:
+        nhom = b.get("nhom") or []
+        if not isinstance(nhom, list):
+            raise ValueError("Dữ liệu nhóm không hợp lệ")
+        c.nhom = [{"id": str(g.get("id")), "ten": str(g.get("ten") or "")[:255]}
+                  for g in nhom if isinstance(g, dict) and str(g.get("id") or "").isdigit()][:100]
+    c.save()
+    return {"cauHinh": sv.cau_hinh_nhom_dict(c)}
+
+
+@api("send", ["POST"])
+def api_nhom_anh(request):
+    """Tải ảnh đính kèm lên (multipart, trường "anh", có thể nhiều file)."""
+    can_khong_dang_gui(request.user)
+    c = CauHinhNhom.cua(request.user)
+    files = request.FILES.getlist("anh")
+    if not files:
+        raise ValueError("Chưa chọn ảnh")
+    for f in files:
+        sv.luu_anh(request.user, c, f)
+    return {"cauHinh": sv.cau_hinh_nhom_dict(c)}
+
+
+@api("send", ["POST"])
+def api_nhom_anh_xoa(request):
+    can_khong_dang_gui(request.user)
+    c = CauHinhNhom.cua(request.user)
+    sv.xoa_anh(request.user, c, str(request.json.get("ten") or ""))
+    return {"cauHinh": sv.cau_hinh_nhom_dict(c)}
+
+
+@login_required
+def xem_anh_nhom(request, ten):
+    """Xem ảnh đính kèm của chính mình."""
+    from django.http import FileResponse, Http404
+    if ten not in CauHinhNhom.cua(request.user).anh:
+        raise Http404
+    f = sv.thu_muc_anh(request.user) / ten
+    if not f.is_file():
+        raise Http404
+    return FileResponse(open(f, "rb"))
+
+
+@api("send", ["POST"])
+def api_nhom_gui(request):
+    """Gửi nội dung + ảnh vào các nhóm đã chọn, bằng Zalo của chính người bấm."""
+    u = request.user
+    if worker.trang_thai(u.id).get("login") != "in":
+        raise ValueError("Bạn chưa kết nối Zalo. Quét QR để kết nối Zalo của bạn trước khi gửi")
+    c = CauHinhNhom.cua(u)
+    if not c.nhom:
+        raise ValueError("Chưa chọn nhóm nào để gửi")
+    if not c.noi_dung and not c.anh:
+        raise ValueError("Chưa có nội dung hay ảnh để gửi")
+    worker.goi("POST", "/run-groups", {
+        "uid": u.id, "groups": c.nhom, "noiDung": c.noi_dung,
+        "anh": [f"{u.id}/{a}" for a in c.anh],
+        "cfg": CaiDat.lay().to_dict(), "runBy": {"id": u.id, "name": str(u)},
+    })
+    return {"ok": True}
+
+
+@api("send", ["GET"])
+def api_nhom_lich_su(request):
+    """100 lần gửi nhóm gần nhất (nhân viên chỉ thấy của mình)."""
+    qs = LichSuGuiNhom.objects.select_related("nguoi_gui")
+    if not request.user.co_quyen("all"):
+        qs = qs.filter(nguoi_gui=request.user)
+    return {"rows": [sv.lich_su_nhom_dict(h) for h in qs[:100]]}

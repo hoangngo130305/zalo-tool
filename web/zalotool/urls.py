@@ -37,4 +37,14 @@ urlpatterns = [
     path("file-mau.xlsx", v.file_mau, name="file-mau"),
     path("api/lich-su/excel", v.api_lich_su_excel),
     path("api/worker/event", v.api_worker_event),
+
+    path("gui-nhom/", v.trang_gui_nhom, name="gui-nhom"),
+    path("api/nhom/state", v.api_nhom_state),
+    path("api/nhom/danh-sach", v.api_nhom_danh_sach),
+    path("api/nhom/cau-hinh", v.api_nhom_cau_hinh),
+    path("api/nhom/anh", v.api_nhom_anh),
+    path("api/nhom/anh/xoa", v.api_nhom_anh_xoa),
+    path("api/nhom/anh/<str:ten>", v.xem_anh_nhom, name="anh-nhom"),
+    path("api/nhom/gui", v.api_nhom_gui),
+    path("api/nhom/lich-su", v.api_nhom_lich_su),
 ]

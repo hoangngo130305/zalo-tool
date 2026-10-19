@@ -300,7 +300,7 @@ function renderRunControls() {
   $("runHint").textContent = st.running ? ""
     : !loggedIn ? "Kết nối Zalo của bạn ở khung “Zalo của tôi” phía trên trước khi gửi."
     : !pending ? (thieu ? `Còn ${thieu} người thiếu nội dung tin nhắn, điền nội dung để gửi.` : "Không còn số nào chờ gửi.")
-    : `Lần này sẽ gửi cho ${n} người${pending > n ? ` (còn ${pending - n} người cho lần sau)` : ""}. Mỗi người cách nhau ${config.choToiThieuGiay}–${config.choToiDaGiay} giây.${thieu ? ` ${thieu} người thiếu nội dung sẽ được bỏ qua.` : ""}`;
+    : `Lần này sẽ gửi cho ${n} người${pending > n ? ` (còn ${pending - n} người cho lần sau)` : ""}. Mỗi người cách nhau ${config.choToiThieuGiay}–${config.choToiDaGiay} giây.${config.nghiSauSoLan ? ` Cứ ${config.nghiSauSoLan} người nghỉ ${config.nghiPhut} phút.` : ""}${thieu ? ` ${thieu} người thiếu nội dung sẽ được bỏ qua.` : ""}`;
   if (st.running) $("confirmBox").classList.add("hidden");
   ["btnAddRow", "btnPaste", "btnImport", "btnClearList", "btnInsertTen", "btnUseAdmin"].forEach((id) => ($(id).disabled = !!st.running));
   $("myMsg").disabled = !!st.running;
@@ -324,6 +324,7 @@ $("btnPreview").onclick = async () => {
     $("pvList").innerHTML = items.map((it, i) => `<div class="pv-item">
       <h3>${i + 1}. ${esc(it.sdt)} · ${esc(it.ten || "không tên")}</h3>
       ${it.loiMoi !== null ? `<div class="preview"><span class="lbl">Lời mời kết bạn</span>${esc(it.loiMoi)}</div>` : ""}
+      ${it.tenGoiNho ? `<div class="preview"><span class="lbl">Đổi tên gợi nhớ thành</span>${esc(it.tenGoiNho)}</div>` : ""}
       ${it.tinNhan !== null ? `<div class="preview"><span class="lbl">Tin nhắn</span>${esc(it.tinNhan)}</div>` : ""}
     </div>`).join("") || `<p class="hint">Không còn ai chờ gửi.</p>`;
     openModal("previewModal");
@@ -334,7 +335,9 @@ $("btnPreview").onclick = async () => {
 setInterval(() => {
   if (st.running && st.waitUntil && !st.current) {
     const s = Math.max(0, Math.round((st.waitUntil - Date.now()) / 1000));
-    $("runNow").textContent = st.stopRequested ? "Đang dừng..." : `Chờ ${s} giây trước người tiếp theo`;
+    $("runNow").textContent = st.stopRequested ? "Đang dừng..."
+      : st.waitBreak ? `Đang nghỉ giữa lượt, còn ${Math.floor(s / 60)} phút ${s % 60} giây`
+      : `Chờ ${s} giây trước lần gửi tiếp theo`;
   }
 }, 1000);
 
@@ -378,7 +381,7 @@ function renderState() {
   if (st.running && st.progress) {
     $("runCount").textContent = `${st.progress.i}/${st.progress.total}`;
     $("runBar").style.width = `${(st.progress.i / st.progress.total) * 100}%`;
-    if (st.current) $("runNow").textContent = `Đang gửi ${st.current}`;
+    if (st.current) $("runNow").textContent = st.kind === "nhom" ? `Đang gửi vào nhóm “${st.current}”` : `Đang gửi ${st.current}`;
   }
   // Bắt đầu / kết thúc đợt gửi thì vẽ lại cả bảng (khoá ô nhập, hiện nút Gửi lại)
   if (renderState.wasRunning !== !!st.running) renderTable();
