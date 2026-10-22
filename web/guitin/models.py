@@ -5,6 +5,24 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
+# Xáo nội dung: nhiều mẫu cách nhau bằng dòng "---", hoặc {a|b|c} để đổi vài từ (xem services.xao)
+HD_XAO = ("Muốn mỗi người nhận một nội dung khác nhau: viết nhiều mẫu, mỗi mẫu cách nhau bằng một dòng chỉ có ---; "
+          "hoặc viết {Chào|Xin chào|Hello} để chọn ngẫu nhiên một từ.")
+THU_MUC_ANH_TIN_NHAN = "anh-tin-nhan"
+
+
+def kho_anh_tin_nhan():
+    """Ảnh gửi kèm tin nhắn cho khách lưu ở data/anh-tin-nhan/ (worker đọc cùng thư mục)."""
+    from django.conf import settings
+    from django.core.files.storage import FileSystemStorage
+    return FileSystemStorage(location=settings.ROOT_DIR / "data" / THU_MUC_ANH_TIN_NHAN)
+
+
+def ten_file_anh(instance, filename):
+    import uuid
+    from pathlib import Path
+    return f"{uuid.uuid4().hex}{Path(filename).suffix.lower()[:6]}"
+
 
 def chuan_hoa_sdt(raw):
     """Chuẩn hoá SĐT: Excel hay làm mất số 0 đầu, hoặc ghi +84 / 84. Trả về None nếu không hợp lệ."""
@@ -70,7 +88,7 @@ class NguoiDung(AbstractUser):
     tin_nhan_mac_dinh = models.TextField(
         "Tin nhắn mặc định của nhân viên", blank=True,
         help_text="Nhân viên tự soạn trên trang gửi tin. Dùng cho các số không có nội dung riêng; "
-                  "để trống thì dùng nội dung mặc định trong Cài đặt gửi tin.")
+                  "để trống thì dùng nội dung mặc định trong Cài đặt gửi tin. " + HD_XAO)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["ho_ten"]
@@ -112,7 +130,7 @@ class NguoiNhan(models.Model):
     sdt = models.CharField("SĐT chuẩn hoá", max_length=10, null=True, blank=True, db_index=True, editable=False)
     ten = models.CharField("Tên", max_length=255, blank=True)
     noi_dung = models.TextField("Nội dung tin nhắn riêng", blank=True,
-                                help_text="Để trống thì dùng nội dung mặc định trong Cài đặt gửi tin. Có thể dùng {ten}.")
+                                help_text="Để trống thì dùng nội dung mặc định trong Cài đặt gửi tin. Có thể dùng {ten}. " + HD_XAO)
     phu_trach = models.ForeignKey(
         NguoiDung, verbose_name="Nhân viên phụ trách", null=True, blank=True, on_delete=models.SET_NULL,
         related_name="nguoi_nhan", limit_choices_to={"vai_tro__in": [NguoiDung.QUAN_TRI, NguoiDung.NHAN_VIEN]},
@@ -189,8 +207,10 @@ class LichSuGui(models.Model):
 # ---------- cài đặt (chỉ 1 dòng) ----------
 class CaiDat(models.Model):
     loi_moi_ket_ban = models.TextField("Lời mời kết bạn", default="Chào {ten}, mình xin phép kết bạn để tiện trao đổi ạ.",
-                                       help_text="{ten} sẽ được thay bằng tên từng người. Nên dưới 150 ký tự.")
-    noi_dung_tin_nhan = models.TextField("Tin nhắn", default="Chào {ten}!", help_text="{ten} sẽ được thay bằng tên từng người.")
+                                       help_text="{ten} sẽ được thay bằng tên từng người. Nên dưới 150 ký tự (mỗi mẫu). "
+                                                 + HD_XAO)
+    noi_dung_tin_nhan = models.TextField("Tin nhắn", default="Chào {ten}!",
+                                         help_text="{ten} sẽ được thay bằng tên từng người. " + HD_XAO)
     gui_ket_ban = models.BooleanField("Gửi lời mời kết bạn", default=True)
     gui_tin_nhan = models.BooleanField("Gửi tin nhắn", default=True)
     gioi_han_moi_lan = models.PositiveSmallIntegerField("Số người tối đa mỗi lần", default=20,
@@ -238,10 +258,48 @@ class CaiDat(models.Model):
             "choToiThieuGiay": self.cho_toi_thieu_giay, "choToiDaGiay": self.cho_toi_da_giay,
             "nghiSauSoLan": self.nghi_sau_so_lan, "nghiPhut": self.nghi_phut,
             "doiTenGoiNho": self.doi_ten_goi_nho, "mauTenGoiNho": self.mau_ten_goi_nho,
+            # Ảnh gửi kèm tin nhắn cho từng khách (đường dẫn trong data/, worker tự đọc)
+            "anh": [f"{THU_MUC_ANH_TIN_NHAN}/{a.tep.name}" for a in self.anh.all()],
         }
 
     def __str__(self):
         return "Cài đặt gửi tin"
+
+
+class AnhTinNhan(models.Model):
+    """Ảnh gửi kèm tin nhắn cho từng khách (quản trị cài trong Cài đặt gửi tin)."""
+    TOI_DA, TOI_DA_MB = 10, 5
+    cai_dat = models.ForeignKey(CaiDat, on_delete=models.CASCADE, related_name="anh")
+    tep = models.FileField("Ảnh", upload_to=ten_file_anh, storage=kho_anh_tin_nhan,
+                           help_text=f"Mỗi khách nhận tin nhắn kèm các ảnh này (tối đa {TOI_DA} ảnh; để trống thì chỉ gửi chữ). "
+                                     f"JPG, PNG hoặc WEBP, tối đa {TOI_DA_MB} MB.")
+    thu_tu = models.PositiveSmallIntegerField("Thứ tự", default=0)
+
+    class Meta:
+        verbose_name = "ảnh đính kèm tin nhắn"
+        verbose_name_plural = "Hình ảnh đính kèm tin nhắn"
+        ordering = ["thu_tu", "id"]
+
+    def clean(self):
+        from .services import loai_anh
+        f = self.tep
+        if not f or getattr(f, "_committed", True):
+            return
+        if f.size > self.TOI_DA_MB * 1024 * 1024:
+            raise ValidationError({"tep": f"Ảnh lớn hơn {self.TOI_DA_MB} MB."})
+        head = f.read(16)
+        f.seek(0)
+        if not loai_anh(head):
+            raise ValidationError({"tep": "File không phải ảnh JPG, PNG hoặc WEBP."})
+
+    def delete(self, *args, **kwargs):
+        tep = self.tep
+        super().delete(*args, **kwargs)
+        if tep:
+            tep.delete(save=False)
+
+    def __str__(self):
+        return f"Ảnh {self.thu_tu or self.id}"
 
 
 # ---------- gửi vào nhóm Zalo ----------

@@ -46,5 +46,6 @@ urlpatterns = [
     path("api/nhom/anh/xoa", v.api_nhom_anh_xoa),
     path("api/nhom/anh/<str:ten>", v.xem_anh_nhom, name="anh-nhom"),
     path("api/nhom/gui", v.api_nhom_gui),
+    path("api/anh-tin-nhan/<int:pk>", v.xem_anh_tin_nhan, name="anh-tin-nhan"),
     path("api/nhom/lich-su", v.api_nhom_lich_su),
 ]

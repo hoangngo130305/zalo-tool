@@ -29,6 +29,7 @@ export function sanitizeConfig(c = {}) {
     nghiPhut: Math.min(240, Math.max(1, num(c.nghiPhut, 10))),
     doiTenGoiNho: c.doiTenGoiNho !== false,
     mauTenGoiNho: String(c.mauTenGoiNho ?? "{ten} {sdt}"),
+    anh: Array.isArray(c.anh) ? c.anh.slice(0, 10).map(String) : [],   // ảnh gửi kèm tin nhắn cho từng khách
   };
 }
 
@@ -39,6 +40,21 @@ export const randomDelay = (cfg) => {
 };
 
 export const fill = (tpl, row) => tpl.replace(/\{ten\}/gi, row.ten || "bạn").trim();
+
+// Xáo nội dung: nhiều mẫu cách nhau bằng một dòng "---" -> chọn ngẫu nhiên 1 mẫu;
+// rồi {a|b|c} -> chọn ngẫu nhiên 1 lựa chọn. {ten} không có "|" nên không bị đụng tới.
+export const cacMau = (text) => String(text ?? "").split(/^\s*-{3,}\s*$/m).map((m) => m.trim()).filter(Boolean);
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+export function spin(text) {
+  const mau = cacMau(text);
+  let t = mau.length ? pick(mau) : "";
+  for (let k = 0; k < 10; k++) {
+    const t2 = t.replace(/\{([^{}]*\|[^{}]*)\}/g, (_, s) => pick(s.split("|")));
+    if (t2 === t) break;
+    t = t2;
+  }
+  return t;
+}
 
 // Tên gợi nhớ: {ten} {sdt}, không có tên thì chỉ còn SĐT
 export const tenGoiNho = (tpl, row) =>
@@ -78,12 +94,14 @@ export function imageInfo(buf) {
   return null;
 }
 
-// Đọc ảnh trong data/anh-gui-nhom/ thành dạng đính kèm của zca-js
-export const IMAGE_DIR = path.join(ROOT, "data", "anh-gui-nhom");
+// Đọc ảnh thành dạng đính kèm của zca-js. Chỉ cho phép ảnh trong data/anh-gui-nhom/ (gửi nhóm)
+// và data/anh-tin-nhan/ (gửi kèm tin nhắn cho khách).
+const DATA_DIR = path.join(ROOT, "data");
+const IMAGE_DIRS = ["anh-gui-nhom", "anh-tin-nhan"].map((d) => path.join(DATA_DIR, d) + path.sep);
 export function loadAttachments(names = []) {
   return names.map((name, i) => {
-    const file = path.resolve(IMAGE_DIR, String(name));
-    if (!file.startsWith(IMAGE_DIR + path.sep)) throw new Error(`Đường dẫn ảnh không hợp lệ: ${name}`);
+    const file = path.resolve(DATA_DIR, String(name));
+    if (!IMAGE_DIRS.some((d) => file.startsWith(d))) throw new Error(`Đường dẫn ảnh không hợp lệ: ${name}`);
     const data = fs.readFileSync(file);
     const info = imageInfo(data);
     if (!info) throw new Error(`File không phải ảnh JPG/PNG/WEBP: ${name}`);
@@ -148,7 +166,8 @@ export async function loginWithQR(zalo, uid, onEvent) {
 }
 
 // ---------- xử lý 1 người ----------
-export async function processOne(api, row, cfg) {
+// attachments: ảnh gửi kèm tin nhắn (đọc sẵn 1 lần cho cả đợt)
+export async function processOne(api, row, cfg, attachments = []) {
   const result = { ten: row.ten, ketBan: "-", tinNhan: "-", thoiGian: new Date().toISOString() };
 
   let user;
@@ -162,7 +181,7 @@ export async function processOne(api, row, cfg) {
 
   if (cfg.guiKetBan) {
     try {
-      await api.sendFriendRequest(fill(cfg.loiMoiKetBan, row), user.uid);
+      await api.sendFriendRequest(spin(fill(cfg.loiMoiKetBan, row)), user.uid);
       result.ketBan = "Đã gửi";
     } catch (e) {
       // Đã là bạn / đã gửi lời mời trước đó vẫn tính là ok để tiếp tục nhắn
@@ -186,10 +205,11 @@ export async function processOne(api, row, cfg) {
 
   if (cfg.guiTinNhan) {
     // Nội dung riêng của từng người (Django đã điền sẵn), không có thì dùng nội dung mặc định
-    const noiDung = row.noiDung ? String(row.noiDung) : fill(cfg.noiDungTinNhan, row);
-    result.noiDung = noiDung;
+    // Mỗi người nhận ngẫu nhiên 1 mẫu; lưu đúng mẫu đã gửi vào lịch sử
+    const noiDung = spin(row.noiDung ? String(row.noiDung) : fill(cfg.noiDungTinNhan, row));
+    result.noiDung = noiDung + (attachments.length ? `\n[kèm ${attachments.length} ảnh]` : "");
     try {
-      await api.sendMessage(noiDung, user.uid, ThreadType.User);
+      await api.sendMessage(attachments.length ? { msg: noiDung, attachments } : noiDung, user.uid, ThreadType.User);
       result.tinNhan = "Đã gửi";
     } catch (e) {
       result.tinNhan = "Lỗi";
@@ -202,11 +222,13 @@ export async function processOne(api, row, cfg) {
 // ---------- gửi vào 1 nhóm ----------
 // job: { noiDung, attachments } dùng chung cho mọi nhóm trong đợt
 export async function processGroup(api, group, job) {
+  // Mỗi nhóm nhận ngẫu nhiên 1 mẫu nội dung
+  const noiDung = spin(job.noiDung);
   const result = {
-    tenNhom: group.ten, ketQua: "-", noiDung: job.noiDung, soAnh: job.attachments.length, thoiGian: new Date().toISOString(),
+    tenNhom: group.ten, ketQua: "-", noiDung, soAnh: job.attachments.length, thoiGian: new Date().toISOString(),
   };
   try {
-    const msg = job.attachments.length ? { msg: job.noiDung, attachments: job.attachments } : job.noiDung;
+    const msg = job.attachments.length ? { msg: noiDung, attachments: job.attachments } : noiDung;
     await api.sendMessage(msg, group.id, ThreadType.Group);
     result.ketQua = "Đã gửi";
   } catch (e) {

@@ -8,7 +8,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import {
   ROOT, sanitizeConfig, newZalo, hasZaloSession, clearZaloSession, savedSessionIds,
-  loginWithSession, loginWithQR, runBatch, sleep, processGroup, listGroups, loadAttachments,
+  loginWithSession, loginWithQR, runBatch, sleep, processOne, processGroup, listGroups, loadAttachments,
 } from "./core.js";
 
 const conf = JSON.parse(fs.readFileSync(path.join(ROOT, "config.json"), "utf8"));
@@ -186,9 +186,13 @@ function startRun(a, { batch, cfg, runBy }) {
     .slice(0, cfg.gioiHanMoiLan)
     .map((r) => ({ sdt: String(r.sdt), ten: String(r.ten ?? ""), noiDung: String(r.noiDung ?? "").slice(0, 5000) }));
   if (!batch.length) throw new Error("Không có số nào để gửi (các số còn lại đang được người khác gửi)");
+  // Ảnh gửi kèm tin nhắn (quản trị cài), đọc 1 lần cho cả đợt
+  const attachments = cfg.guiTinNhan ? loadAttachments(cfg.anh) : [];
+  if (attachments.length) log(a, `Tin nhắn sẽ gửi kèm ${attachments.length} ảnh.`);
 
   launch(a, {
     kind: "ca-nhan", items: batch, cfg, runBy, label: "người",
+    task: (api, row, c) => processOne(api, row, c, attachments),
     keyOf: (r, long) => (long ? `${r.sdt} - ${r.ten || "không tên"}` : r.sdt),
     onResult: async (row, res) => {
       // Lưu kết quả là quan trọng nhất: thử lại nhiều lần

@@ -92,9 +92,11 @@ $("btnLoadGroups").onclick = async () => {
 };
 
 // ---------- nội dung & ảnh ----------
+const cacMau = (t) => String(t || "").split(/^\s*-{3,}\s*$/m).map((s) => s.trim()).filter(Boolean);
 function renderMsg() {
   const n = $("msg").value.length;
-  $("msgCount").textContent = n ? `${n} ký tự` : "";
+  const soMau = cacMau($("msg").value).length;
+  $("msgCount").textContent = (n ? `${n} ký tự` : "") + (soMau > 1 ? ` · ${soMau} mẫu, xáo ngẫu nhiên` : "");
   $("imgCount").textContent = `${cauHinh.anh.length}/${anhToiDa} ảnh`;
   const locked = !!st.running;
   $("thumbs").innerHTML = cauHinh.anh.map((a, i) => `<figure class="thumb">
@@ -103,6 +105,7 @@ function renderMsg() {
   </figure>`).join("") || `<p class="hint" style="margin:6px 0 0">Chưa có ảnh (không bắt buộc).</p>`;
   $("btnAddImg").disabled = locked || cauHinh.anh.length >= anhToiDa;
   $("msg").disabled = locked;
+  $("btnAddMau").disabled = locked;
   renderRunControls();
 }
 const saveMsg = debounce(async () => {
@@ -116,6 +119,13 @@ $("msg").addEventListener("input", () => {
   renderMsg();
   saveMsg();
 });
+$("btnAddMau").onclick = () => {
+  const t = $("msg");
+  if (t.value.trim()) t.value = `${t.value.trimEnd()}\n---\n`;
+  t.focus();
+  t.selectionStart = t.selectionEnd = t.value.length;
+  t.dispatchEvent(new Event("input"));
+};
 $("btnAddImg").onclick = () => $("imgInput").click();
 $("imgInput").onchange = async () => {
   const files = [...$("imgInput").files];

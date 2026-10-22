@@ -71,6 +71,26 @@ def danh_sach(user, chon="all"):
     } for r in rows]
 
 
+def cac_mau(text):
+    """Tách nội dung thành các mẫu: mỗi mẫu cách nhau bằng một dòng chỉ có --- (giống worker)."""
+    import re
+    return [m.strip() for m in re.split(r"(?m)^\s*-{3,}\s*$", text or "") if m.strip()]
+
+
+def xao(text):
+    """Chọn ngẫu nhiên 1 mẫu, rồi thay {a|b|c} bằng 1 lựa chọn ngẫu nhiên. Worker làm y hệt khi gửi thật."""
+    import random
+    import re
+    mau = cac_mau(text)
+    t = random.choice(mau) if mau else ""
+    for _ in range(10):
+        t2 = re.sub(r"\{([^{}]*\|[^{}]*)\}", lambda m: random.choice(m.group(1).split("|")), t)
+        if t2 == t:
+            break
+        t = t2
+    return t
+
+
 def dien(tpl, ten):
     """Thay {ten} bằng tên người nhận (trống thì thành "bạn")."""
     import re

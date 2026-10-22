@@ -173,12 +173,19 @@ def api_import(request):
 def api_preview(request):
     cfg = CaiDat.lay()
     items = sv.cho_gui(request.user, request.json.get("phamVi"), cfg.gioi_han_moi_lan)
-    return {"items": [{
-        "sdt": r.sdt, "ten": r.ten,
-        "loiMoi": sv.dien(cfg.loi_moi_ket_ban, r.ten) if cfg.gui_ket_ban else None,
-        "tenGoiNho": sv.ten_goi_nho(cfg.mau_ten_goi_nho, r.ten, r.sdt) if cfg.doi_ten_goi_nho else None,
-        "tinNhan": sv.noi_dung_gui(r, cfg) if cfg.gui_tin_nhan else None,
-    } for r in items]}
+    so_anh = cfg.anh.count() if cfg.gui_tin_nhan else 0
+    # Có nhiều mẫu thì xem trước một mẫu ngẫu nhiên (lúc gửi thật mỗi người cũng nhận ngẫu nhiên 1 mẫu)
+    out = []
+    for r in items:
+        loi_moi, tin = sv.dien(cfg.loi_moi_ket_ban, r.ten), sv.noi_dung_gui(r, cfg)
+        out.append({
+            "sdt": r.sdt, "ten": r.ten,
+            "loiMoi": sv.xao(loi_moi) if cfg.gui_ket_ban else None, "soMauLoiMoi": len(sv.cac_mau(loi_moi)),
+            "tenGoiNho": sv.ten_goi_nho(cfg.mau_ten_goi_nho, r.ten, r.sdt) if cfg.doi_ten_goi_nho else None,
+            "tinNhan": sv.xao(tin) if cfg.gui_tin_nhan else None, "soMauTinNhan": len(sv.cac_mau(tin)),
+            "soAnh": so_anh,
+        })
+    return {"items": out}
 
 
 @api("send", ["POST"])
@@ -483,6 +490,17 @@ def api_nhom_anh_xoa(request):
 
 
 @login_required
+def xem_anh_tin_nhan(request, pk):
+    """Xem ảnh gửi kèm tin nhắn khách (quản trị cài; ai đăng nhập cũng xem được để biết sẽ gửi gì)."""
+    from django.http import FileResponse, Http404
+    from .models import AnhTinNhan
+    a = AnhTinNhan.objects.filter(pk=pk).first()
+    if not a or not a.tep or not a.tep.storage.exists(a.tep.name):
+        raise Http404
+    return FileResponse(a.tep.open("rb"))
+
+
+@login_required
 def xem_anh_nhom(request, ten):
     """Xem ảnh đính kèm của chính mình."""
     from django.http import FileResponse, Http404
@@ -507,7 +525,7 @@ def api_nhom_gui(request):
         raise ValueError("Chưa có nội dung hay ảnh để gửi")
     worker.goi("POST", "/run-groups", {
         "uid": u.id, "groups": c.nhom, "noiDung": c.noi_dung,
-        "anh": [f"{u.id}/{a}" for a in c.anh],
+        "anh": [f"anh-gui-nhom/{u.id}/{a}" for a in c.anh],
         "cfg": CaiDat.lay().to_dict(), "runBy": {"id": u.id, "name": str(u)},
     })
     return {"ok": True}

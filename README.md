@@ -73,6 +73,13 @@ Trang **/gui-nhom/** (nhân viên: tab **Gửi vào nhóm Zalo**; quản trị: 
   vd “Anh Nam 0901234567”). Zalo có thể không cho đổi tên người chưa là bạn, khi đó lỗi được ghi ở cột Ghi chú,
   tin nhắn vẫn gửi bình thường.
 
+### Ảnh kèm tin nhắn khách, xáo nội dung
+- **Ảnh kèm tin nhắn khách**: /admin/ → Cài đặt gửi tin → mục **Hình ảnh gửi kèm tin nhắn** (tối đa 10 ảnh JPG/PNG/WEBP,
+  mỗi ảnh ≤ 5 MB). Mỗi khách nhận tin nhắn kèm các ảnh này. Để trống thì chỉ gửi chữ.
+- **Xáo nội dung**: trong lời mời kết bạn, tin nhắn (của quản trị, của nhân viên, nội dung riêng từng dòng) và tin gửi nhóm,
+  viết nhiều mẫu cách nhau bằng một dòng chỉ có `---`; mỗi khách / mỗi nhóm nhận ngẫu nhiên 1 mẫu. Muốn chỉ đổi vài từ thì
+  viết `{Chào|Xin chào|Hello}`. Lịch sử gửi lưu đúng mẫu khách đã nhận.
+
 ### Tài khoản
 - Sai mật khẩu 5 lần sẽ bị khoá đăng nhập 5 phút.
 - Khoá tài khoản: /admin/ → Tài khoản → bỏ chọn “Hoạt động”. Xoá tài khoản thì các số người đó

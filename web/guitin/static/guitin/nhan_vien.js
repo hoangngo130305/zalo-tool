@@ -18,6 +18,8 @@ function normalizePhone(raw) {
   else if (p.length === 9) p = "0" + p;
   return /^0\d{9}$/.test(p) ? p : null;
 }
+// Nhiều mẫu tin nhắn cách nhau bằng dòng "---": mỗi khách nhận ngẫu nhiên 1 mẫu (worker chọn khi gửi)
+const cacMau = (t) => String(t || "").split(/^\s*-{3,}\s*$/m).map((s) => s.trim()).filter(Boolean);
 const fill = (tpl, ten) => String(tpl || "").replace(/\{ten\}/gi, () => ten || "bạn").trim();
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const csrfToken = () => document.cookie.split("; ").find((c) => c.startsWith("csrftoken="))?.split("=")[1] || "";
@@ -250,12 +252,18 @@ function renderPreview() {
   $("myMsg").placeholder = config.noiDungTinNhan
     ? `Để trống sẽ dùng nội dung của quản trị:\n${config.noiDungTinNhan}`
     : "Soạn tin nhắn gửi cho tất cả người trong danh sách...";
-  $("myMsgCount").textContent = myDefault ? `${myDefault.length} ký tự` : "đang dùng nội dung của quản trị";
+  const soMau = cacMau(baseMsg()).length;
+  $("myMsgCount").textContent = (myDefault ? `${myDefault.length} ký tự` : "đang dùng nội dung của quản trị")
+    + (soMau > 1 ? ` · ${soMau} mẫu, xáo ngẫu nhiên` : "");
   $("btnUseAdmin").classList.toggle("hidden", !myDefault);
-  $("pvMsgLabel").textContent = `Xem trước tin nhắn (ví dụ cho "${ten}")`;
+  const soAnh = (config.anh || []).length;
+  $("pvMsgLabel").textContent = `Xem trước tin nhắn (ví dụ cho "${ten}")`
+    + (soMau > 1 ? `, mẫu 1/${soMau}` : "") + (soAnh && config.guiTinNhan ? `, kèm ${soAnh} ảnh` : "");
   $("pvMsg").textContent = !config.guiTinNhan ? "(quản trị đang tắt gửi tin nhắn)"
-    : baseMsg() ? fill(baseMsg(), ten) : "(chưa có nội dung, soạn tin nhắn ở ô trên hoặc nhập nội dung riêng cho từng người)";
-  $("pvInvite").textContent = config.guiKetBan ? fill(config.loiMoiKetBan, ten) : "(không gửi lời mời kết bạn)";
+    : baseMsg() ? fill(cacMau(baseMsg())[0] || "", ten) : "(chưa có nội dung, soạn tin nhắn ở ô trên hoặc nhập nội dung riêng cho từng người)";
+  const mauLoiMoi = cacMau(config.loiMoiKetBan);
+  $("pvLabel").textContent = "Lời mời kết bạn (do quản trị soạn)" + (mauLoiMoi.length > 1 ? `, mẫu 1/${mauLoiMoi.length}` : "");
+  $("pvInvite").textContent = config.guiKetBan ? fill(mauLoiMoi[0] || "", ten) : "(không gửi lời mời kết bạn)";
 }
 const saveMyMsg = debounce(async () => {
   try {
@@ -277,6 +285,13 @@ $("btnInsertTen").onclick = () => {
   t.value = t.value.slice(0, a) + "{ten}" + t.value.slice(b);
   t.focus();
   t.selectionStart = t.selectionEnd = a + 5;
+  t.dispatchEvent(new Event("input"));
+};
+$("btnAddMau").onclick = () => {
+  const t = $("myMsg");
+  if (t.value.trim()) t.value = `${t.value.trimEnd()}\n---\n`;
+  t.focus();
+  t.selectionStart = t.selectionEnd = t.value.length;
   t.dispatchEvent(new Event("input"));
 };
 $("btnUseAdmin").onclick = () => {
@@ -302,7 +317,7 @@ function renderRunControls() {
     : !pending ? (thieu ? `Còn ${thieu} người thiếu nội dung tin nhắn, điền nội dung để gửi.` : "Không còn số nào chờ gửi.")
     : `Lần này sẽ gửi cho ${n} người${pending > n ? ` (còn ${pending - n} người cho lần sau)` : ""}. Mỗi người cách nhau ${config.choToiThieuGiay}–${config.choToiDaGiay} giây.${config.nghiSauSoLan ? ` Cứ ${config.nghiSauSoLan} người nghỉ ${config.nghiPhut} phút.` : ""}${thieu ? ` ${thieu} người thiếu nội dung sẽ được bỏ qua.` : ""}`;
   if (st.running) $("confirmBox").classList.add("hidden");
-  ["btnAddRow", "btnPaste", "btnImport", "btnClearList", "btnInsertTen", "btnUseAdmin"].forEach((id) => ($(id).disabled = !!st.running));
+  ["btnAddRow", "btnPaste", "btnImport", "btnClearList", "btnInsertTen", "btnAddMau", "btnUseAdmin"].forEach((id) => ($(id).disabled = !!st.running));
   $("myMsg").disabled = !!st.running;
 }
 $("btnStart").onclick = () => {
@@ -323,9 +338,9 @@ $("btnPreview").onclick = async () => {
     $("pvTitle").textContent = `Xem trước đợt gửi (${items.length} người)`;
     $("pvList").innerHTML = items.map((it, i) => `<div class="pv-item">
       <h3>${i + 1}. ${esc(it.sdt)} · ${esc(it.ten || "không tên")}</h3>
-      ${it.loiMoi !== null ? `<div class="preview"><span class="lbl">Lời mời kết bạn</span>${esc(it.loiMoi)}</div>` : ""}
+      ${it.loiMoi !== null ? `<div class="preview"><span class="lbl">Lời mời kết bạn${it.soMauLoiMoi > 1 ? ` (ngẫu nhiên 1 trong ${it.soMauLoiMoi} mẫu)` : ""}</span>${esc(it.loiMoi)}</div>` : ""}
       ${it.tenGoiNho ? `<div class="preview"><span class="lbl">Đổi tên gợi nhớ thành</span>${esc(it.tenGoiNho)}</div>` : ""}
-      ${it.tinNhan !== null ? `<div class="preview"><span class="lbl">Tin nhắn</span>${esc(it.tinNhan)}</div>` : ""}
+      ${it.tinNhan !== null ? `<div class="preview"><span class="lbl">Tin nhắn${it.soMauTinNhan > 1 ? ` (ngẫu nhiên 1 trong ${it.soMauTinNhan} mẫu)` : ""}${it.soAnh ? `, kèm ${it.soAnh} ảnh` : ""}</span>${esc(it.tinNhan)}</div>` : ""}
     </div>`).join("") || `<p class="hint">Không còn ai chờ gửi.</p>`;
     openModal("previewModal");
   } catch (e) { showError(e); }

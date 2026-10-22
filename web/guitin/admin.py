@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from . import services as sv
-from .models import CaiDat, KetQua, LichSuGui, LichSuGuiNhom, NguoiDung, NguoiNhan, NhatKy
+from .models import AnhTinNhan, CaiDat, KetQua, LichSuGui, LichSuGuiNhom, NguoiDung, NguoiNhan, NhatKy
 
 
 # ---------- tài khoản ----------
@@ -369,8 +369,25 @@ class LichSuGuiNhomAdmin(admin.ModelAdmin):
 
 
 # ---------- cài đặt (1 dòng) ----------
+class AnhTinNhanInline(admin.TabularInline):
+    model = AnhTinNhan
+    extra = 1
+    max_num = AnhTinNhan.TOI_DA
+    fields = ("xem", "tep", "thu_tu")
+    readonly_fields = ("xem",)
+    verbose_name_plural = "Hình ảnh gửi kèm tin nhắn"
+
+    @admin.display(description="Xem")
+    def xem(self, obj):
+        if not obj.pk:
+            return "–"
+        url = reverse("anh-tin-nhan", args=[obj.pk])
+        return format_html('<a href="{}" target="_blank"><img src="{}" style="height:72px;border-radius:6px"></a>', url, url)
+
+
 @admin.register(CaiDat)
 class CaiDatAdmin(admin.ModelAdmin):
+    inlines = [AnhTinNhanInline]
     fieldsets = (
         ("Nội dung", {"fields": ("loi_moi_ket_ban", "noi_dung_tin_nhan")}),
         ("Gửi gì", {"fields": ("gui_ket_ban", "gui_tin_nhan")}),
