@@ -459,7 +459,7 @@ async function loadHistory() {
       <td>${h.thanhCong ? '<span class="pill ok">Thành công</span>' : '<span class="pill bad">Lỗi</span>'}
         <span class="note">Kết bạn: ${esc(h.ketBan)} · Tin nhắn: ${esc(h.tinNhan)}</span></td>
       <td class="msg-cell">${esc(h.noiDung)}</td>
-      <td class="note" style="white-space:normal;max-width:220px">${esc(h.ghiChu)}</td>
+      <td><span class="note" style="white-space:normal;max-width:220px">${esc(h.ghiChu)}</span></td>
     </tr>`).join("");
     $("hEmpty").classList.toggle("hidden", r.rows.length > 0);
   } catch (e) { showError(e); }
