@@ -176,37 +176,134 @@ def chia_deu():
 
 
 # ---------- nhập danh sách ----------
-def doc_file(data):
-    """Đọc file Excel (.xlsx) hoặc CSV: cột SĐT / Số điện thoại / Phone, Tên / Họ tên / Name,
-    và (không bắt buộc) Nội dung / Nội dung tin nhắn / Tin nhắn / Message."""
+def _bang_tu_file(data):
+    """Đọc file thành danh sách dòng (mỗi dòng là list chuỗi). Hỗ trợ .xlsx, .xls (Excel 97-2003),
+    .xls thực chất là bảng HTML (hay gặp khi xuất từ phần mềm khác) và CSV. File lỗi thì báo ValueError dễ hiểu."""
     import csv
     import io
+    import re
     import unicodedata
+
+    def o(v):
+        if v is None:
+            return ""
+        if isinstance(v, float) and v.is_integer():
+            v = int(v)          # Excel lưu SĐT dạng số: 901234567.0 -> 901234567
+        return str(v).strip()
 
     if data[:2] == b"PK":
         from openpyxl import load_workbook
-        ws = load_workbook(io.BytesIO(data), read_only=True, data_only=True).worksheets[0]
-        rows = [["" if v is None else str(v).strip() for v in r] for r in ws.iter_rows(values_only=True)]
+        try:
+            ws = load_workbook(io.BytesIO(data), read_only=True, data_only=True).worksheets[0]
+            return [[o(v) for v in r] for r in ws.iter_rows(values_only=True)]
+        except Exception as e:  # noqa: BLE001
+            raise ValueError("Không đọc được file Excel (.xlsx), file có thể bị lỗi. Mở file bằng Excel rồi lưu lại "
+                             "(File → Save As → Excel Workbook .xlsx) và nhập lại.") from e
+
+    if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":          # Excel 97-2003 (.xls)
+        try:
+            import xlrd
+            sh = xlrd.open_workbook(file_contents=data).sheet_by_index(0)
+            return [[o(v) for v in sh.row_values(i)] for i in range(sh.nrows)]
+        except Exception as e:  # noqa: BLE001
+            raise ValueError("Không đọc được file Excel đời cũ (.xls). Mở file bằng Excel rồi lưu thành .xlsx "
+                             "(File → Save As → Excel Workbook) và nhập lại.") from e
+
+    # Văn bản: thử UTF-8 trước, không được thì bảng mã tiếng Việt cũ của Windows
+    for enc in ("utf-8-sig", "cp1258", "cp1252"):
+        try:
+            text = data.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
     else:
-        text = data.decode("utf-8-sig", errors="replace")
-        delim = ";" if text.count(";") > text.count(",") else ","
-        rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text), delimiter=delim)]
+        text = data.decode("utf-8", errors="replace")
+    text = unicodedata.normalize("NFC", text)    # cp1258 lưu dấu tách rời: ghép lại cho đúng chữ
+
+    if "\x00" in text[:2000]:
+        raise ValueError("File không phải Excel hay CSV. Hãy chọn file .xlsx, .xls hoặc .csv.")
+
+    head = text.lstrip()[:2000].lower()
+    if head.startswith("<") and ("<table" in text.lower()):    # .xls xuất từ web: thực chất là bảng HTML
+        from html.parser import HTMLParser
+
+        class Bang(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.rows, self.row, self.cell = [], None, None
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "tr":
+                    self.row = []
+                elif tag in ("td", "th") and self.row is not None:
+                    self.cell = []
+                elif tag == "br" and self.cell is not None:
+                    self.cell.append("\n")
+
+            def handle_endtag(self, tag):
+                if tag in ("td", "th") and self.row is not None and self.cell is not None:
+                    self.row.append(re.sub(r"[ \t\r\f\v\xa0]+", " ", "".join(self.cell)).strip())
+                    self.cell = None
+                elif tag == "tr" and self.row is not None:
+                    self.rows.append(self.row)
+                    self.row = None
+
+            def handle_data(self, d):
+                if self.cell is not None:
+                    self.cell.append(d)
+
+        p = Bang()
+        p.feed(text)
+        return p.rows
+
+    # CSV: chuẩn hoá xuống dòng (\r\n, \r kiểu Mac cũ) rồi đọc
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    first = text[:5000]
+    delim = max((";", ",", "\t"), key=first.count)
+    try:
+        return [[c.strip() for c in r] for r in csv.reader(io.StringIO(text, newline=""), delimiter=delim)]
+    except csv.Error as e:
+        raise ValueError(f"File CSV bị lỗi định dạng ({e}). Mở file bằng Excel rồi lưu thành .xlsx và nhập lại.") from e
+
+
+def doc_file(data):
+    """Đọc file Excel (.xlsx/.xls) hoặc CSV: cột SĐT / Số điện thoại / Phone, Tên / Họ tên / Name,
+    và (không bắt buộc) Nội dung / Nội dung tin nhắn / Tin nhắn / Message.
+    Dòng tiêu đề không cần nằm ở dòng đầu (bỏ qua dòng tên bảng phía trên)."""
+    import unicodedata
+
+    rows = _bang_tu_file(data)
     if not rows:
         return []
 
     def key(s):
         s = unicodedata.normalize("NFD", str(s).lower()).replace("đ", "d")
-        return "".join(ch for ch in s if unicodedata.category(ch) != "Mn" and not ch.isspace())
+        return "".join(ch for ch in s if unicodedata.category(ch) != "Mn" and ch.isalnum())
 
-    head = [key(h) for h in rows[0]]
-    sdt_cot = next((i for i, h in enumerate(head) if h in ("sdt", "sodienthoai", "dienthoai", "phone")), None)
-    ten_cot = next((i for i, h in enumerate(head) if h in ("ten", "hoten", "hovaten", "name", "tenkhachhang")), None)
-    nd_cot = next((i for i, h in enumerate(head)
-                   if h in ("noidung", "noidungtinnhan", "noidunggui", "tinnhan", "loinhan", "message", "content")), None)
-    if sdt_cot is None:
-        raise ValueError("Không thấy cột SĐT. File cần có cột SĐT (hoặc Số điện thoại / Phone) và cột Tên.")
+    def la_sdt(h):
+        return h in ("sdt", "sodienthoai", "dienthoai", "phone", "sodt", "didong", "mobile", "tel") or \
+            h.startswith("sdt") or "dienthoai" in h or "didong" in h or "phone" in h
+
+    def la_ten(h):
+        return h in ("ten", "hoten", "hovaten", "name", "tenkhachhang", "khachhang", "fullname") or \
+            (("ten" in h or "name" in h) and "zalo" not in h and "nhanvien" not in h and "phutrach" not in h)
+
+    def la_nd(h):
+        return h in ("noidung", "noidungtinnhan", "noidunggui", "tinnhan", "loinhan", "message", "content")
+
+    # Tìm dòng tiêu đề trong 10 dòng đầu
+    for hi, r in enumerate(rows[:10]):
+        head = [key(h) for h in r]
+        sdt_cot = next((i for i, h in enumerate(head) if la_sdt(h)), None)
+        if sdt_cot is not None:
+            break
+    else:
+        raise ValueError("Không thấy cột SĐT. File cần có cột SĐT (hoặc Số điện thoại / Phone) và cột Tên. "
+                         "Bấm “Tải file mẫu” để xem mẫu.")
+    ten_cot = next((i for i, h in enumerate(head) if i != sdt_cot and la_ten(h)), None)
+    nd_cot = next((i for i, h in enumerate(head) if la_nd(h)), None)
     out = []
-    for r in rows[1:]:
+    for r in rows[hi + 1:]:
         sdt = str(r[sdt_cot] if sdt_cot < len(r) else "").strip()
         if sdt.endswith(".0"):
             sdt = sdt[:-2]

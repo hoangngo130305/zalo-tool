@@ -4,3 +4,4 @@ django-jazzmin==3.0.1
 openpyxl==3.1.5
 waitress==3.0.2
 whitenoise==6.8.2
+xlrd==2.0.1

@@ -110,7 +110,8 @@ class TrangThaiFilter(admin.SimpleListFilter):
 
 class NhapDanhSachForm(forms.Form):
     tep = forms.FileField(label="File Excel / CSV", required=False,
-                          help_text="Dòng đầu là tên cột: SĐT (hoặc Số điện thoại / Phone), Họ tên, và Nội dung (không bắt buộc).")
+                          help_text="File .xlsx, .xls hoặc .csv. Có dòng tên cột: SĐT (hoặc Số điện thoại / Phone), Họ tên, "
+                                    "và Nội dung (không bắt buộc).")
     dan = forms.CharField(label="Hoặc dán danh sách", required=False, widget=forms.Textarea(attrs={"rows": 8}),
                           help_text="Mỗi dòng một người: SĐT, Họ tên, Nội dung tin nhắn. Có thể copy thẳng 2–3 cột từ Excel.")
     phu_trach = forms.ModelChoiceField(label="Giao cho nhân viên", required=False, queryset=NguoiDung.objects.none(),
