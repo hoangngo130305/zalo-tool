@@ -24,16 +24,56 @@ def ten_file_anh(instance, filename):
     return f"{uuid.uuid4().hex}{Path(filename).suffix.lower()[:6]}"
 
 
+# Đầu số di động 11 số cũ -> 10 số mới (chuyển đổi năm 2018)
+DAU_SO_CU = {
+    "0120": "070", "0121": "079", "0122": "077", "0126": "076", "0128": "078",
+    "0123": "083", "0124": "084", "0125": "085", "0127": "081", "0129": "082",
+    "0162": "032", "0163": "033", "0164": "034", "0165": "035", "0166": "036", "0167": "037", "0168": "038", "0169": "039",
+    "0186": "056", "0188": "058", "0199": "059",
+}
+
+
 def chuan_hoa_sdt(raw):
-    """Chuẩn hoá SĐT: Excel hay làm mất số 0 đầu, hoặc ghi +84 / 84. Trả về None nếu không hợp lệ."""
+    """Chuẩn hoá SĐT: Excel hay làm mất số 0 đầu, hoặc ghi +84 / 84; số 11 chữ số đầu cũ (0162...) đổi sang đầu mới.
+    Trả về None nếu không hợp lệ."""
     p = re.sub(r"[^\d+]", "", str(raw or ""))
     if p.startswith("+84"):
         p = "0" + p[3:]
-    elif p.startswith("84") and len(p) == 11:
+    elif p.startswith("84") and len(p) in (11, 12):
         p = "0" + p[2:]
-    elif len(p) == 9:
+    elif len(p) in (9, 10) and not p.startswith("0"):
         p = "0" + p
+    if len(p) == 11 and p[:4] in DAU_SO_CU:
+        p = DAU_SO_CU[p[:4]] + p[4:]
     return p if re.fullmatch(r"0\d{9}", p) else None
+
+
+def tach_sdt(raw):
+    """Lấy các SĐT hợp lệ trong 1 ô (ô có thể ghi nhiều số: "090.. - 091..", "090../091..", xuống dòng,
+    hoặc 2 số dính liền nhau). Trả về danh sách SĐT đã chuẩn hoá, giữ thứ tự, không trùng."""
+    s = str(raw or "")
+    out = []
+    for part in re.split(r"[/;,|\n\r]+|\s[-–]\s|\s{2,}|hoặc|hoac|or", s, flags=re.IGNORECASE):
+        p = chuan_hoa_sdt(part)
+        found = [p] if p else _tach_so_dinh_lien(re.sub(r"\D", "", part))
+        for q in found:
+            if q not in out:
+                out.append(q)
+    return out
+
+
+def _tach_so_dinh_lien(d):
+    """Chuỗi chữ số gồm nhiều SĐT viết liền nhau (vd 20 chữ số = 2 số). Chỉ nhận khi tách được
+    trọn vẹn thành các số hợp lệ, không thừa chữ số nào (để không cắt nhầm số bàn / số lạ)."""
+    out, i = [], 0
+    while i < len(d):
+        n = 11 if d[i:i + 4] in DAU_SO_CU else 10
+        q = chuan_hoa_sdt(d[i:i + n])
+        if not q:
+            return []
+        out.append(q)
+        i += n
+    return out if len(out) > 1 else []
 
 
 def nhom_chi_xem():

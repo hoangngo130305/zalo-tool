@@ -303,10 +303,15 @@ def doc_file(data):
     ten_cot = next((i for i, h in enumerate(head) if i != sdt_cot and la_ten(h)), None)
     nd_cot = next((i for i, h in enumerate(head) if la_nd(h)), None)
     out = []
+    from .models import tach_sdt
     for r in rows[hi + 1:]:
         sdt = str(r[sdt_cot] if sdt_cot < len(r) else "").strip()
         if sdt.endswith(".0"):
             sdt = sdt[:-2]
+        # Ô ghi nhiều số / số 11 chữ số cũ: lấy số hợp lệ đầu tiên
+        cac_so = tach_sdt(sdt)
+        if cac_so:
+            sdt = cac_so[0]
         if sdt:
             out.append({"sdt": sdt, "ten": r[ten_cot] if ten_cot is not None and ten_cot < len(r) else "",
                         "noiDung": r[nd_cot] if nd_cot is not None and nd_cot < len(r) else ""})

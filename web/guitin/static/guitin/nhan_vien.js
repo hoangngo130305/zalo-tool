@@ -11,11 +11,19 @@ let lastLogId = 0;
 let listDirty = false;    // có thay đổi chưa lưu -> không tải đè
 
 // ---------- tiện ích ----------
+// Đầu số di động 11 số cũ -> 10 số mới (giống chuan_hoa_sdt ở server)
+const DAU_SO_CU = {
+  "0120": "070", "0121": "079", "0122": "077", "0126": "076", "0128": "078",
+  "0123": "083", "0124": "084", "0125": "085", "0127": "081", "0129": "082",
+  "0162": "032", "0163": "033", "0164": "034", "0165": "035", "0166": "036", "0167": "037", "0168": "038", "0169": "039",
+  "0186": "056", "0188": "058", "0199": "059",
+};
 function normalizePhone(raw) {
   let p = String(raw ?? "").replace(/[^\d+]/g, "");
   if (p.startsWith("+84")) p = "0" + p.slice(3);
-  else if (p.startsWith("84") && p.length === 11) p = "0" + p.slice(2);
-  else if (p.length === 9) p = "0" + p;
+  else if (p.startsWith("84") && (p.length === 11 || p.length === 12)) p = "0" + p.slice(2);
+  else if ((p.length === 9 || p.length === 10) && !p.startsWith("0")) p = "0" + p;
+  if (p.length === 11 && DAU_SO_CU[p.slice(0, 4)]) p = DAU_SO_CU[p.slice(0, 4)] + p.slice(4);
   return /^0\d{9}$/.test(p) ? p : null;
 }
 // Nhiều mẫu tin nhắn cách nhau bằng dòng "---": mỗi khách nhận ngẫu nhiên 1 mẫu (worker chọn khi gửi)
