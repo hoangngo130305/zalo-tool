@@ -65,7 +65,7 @@ def danh_sach(user, chon="all"):
     rows = list(qs)
     kq = {k.sdt: k for k in KetQua.objects.filter(sdt__in=[r.sdt for r in rows if r.sdt]).select_related("nguoi_gui")}
     return [{
-        "sdt": r.sdt_goc, "ten": r.ten, "noiDung": r.noi_dung, "sdtChuan": r.sdt,
+        "sdt": r.sdt_goc, "ten": r.ten, "noiDung": r.noi_dung, "duAn": r.du_an, "sdtChuan": r.sdt,
         "phuTrach": r.phu_trach_id, "phuTrachTen": str(r.phu_trach) if r.phu_trach else None,
         "ketQua": ket_qua_dict(kq[r.sdt]) if r.sdt in kq else None,
     } for r in rows]
@@ -97,13 +97,19 @@ def dien(tpl, ten):
     return re.sub(r"\{ten\}", lambda m: ten or "bạn", tpl or "", flags=re.IGNORECASE).strip()
 
 
-def ten_goi_nho(tpl, ten, sdt):
-    """Tên gợi nhớ đặt cho người được mời kết bạn (giống worker): {ten} {sdt}, không có tên thì chỉ còn SĐT."""
+def du_an_cua(r, cfg):
+    """Tên dự án của 1 người nhận: dự án riêng của dòng, không có thì dự án mặc định trong cài đặt."""
+    return (r.du_an or cfg.ten_du_an or "").strip()
+
+
+def ten_goi_nho(tpl, ten, sdt, du_an=""):
+    """Tên gợi nhớ đặt cho người được mời kết bạn (giống worker): {ten} {sdt} {duan}, thiếu phần nào thì bỏ phần đó."""
     import re
-    s = re.sub(r"\{ten\}", lambda m: ten or "", tpl or "{ten} {sdt}", flags=re.IGNORECASE)
+    s = re.sub(r"\{ten\}", lambda m: ten or "", tpl or "{ten} {sdt} {duan}", flags=re.IGNORECASE)
     s = re.sub(r"\{sdt\}", lambda m: sdt or "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\{duan\}", lambda m: du_an or "", s, flags=re.IGNORECASE)
     # Bỏ dấu nối thừa ở hai đầu khi thiếu tên, vd "{ten} - {sdt}" -> "0901234567"
-    return " ".join(s.split()).strip(" -–|,.:")[:60] or sdt
+    return " ".join(s.split()).strip(" -–|,.:")[:80] or sdt
 
 
 def noi_dung_gui(r, cfg):
@@ -154,7 +160,7 @@ def luu_danh_sach(user, rows):
     NguoiNhan.objects.bulk_create([
         NguoiNhan(thu_tu=base + i + 1, sdt_goc=str(r.get("sdt") or "").strip()[:32], sdt=chuan_hoa_sdt(r.get("sdt")),
                   ten=str(r.get("ten") or "").strip()[:255], noi_dung=str(r.get("noiDung") or "").strip()[:5000],
-                  phu_trach_id=owner(r))
+                  du_an=str(r.get("duAn") or "").strip()[:100], phu_trach_id=owner(r))
         for i, r in enumerate(rows)
     ])
     tang_phien_ban()
@@ -291,6 +297,9 @@ def doc_file(data):
     def la_nd(h):
         return h in ("noidung", "noidungtinnhan", "noidunggui", "tinnhan", "loinhan", "message", "content")
 
+    def la_du_an(h):
+        return h in ("duan", "tenduan", "project", "duanquantam", "sanpham")
+
     # Tìm dòng tiêu đề trong 10 dòng đầu
     for hi, r in enumerate(rows[:10]):
         head = [key(h) for h in r]
@@ -302,6 +311,7 @@ def doc_file(data):
                          "Bấm “Tải file mẫu” để xem mẫu.")
     ten_cot = next((i for i, h in enumerate(head) if i != sdt_cot and la_ten(h)), None)
     nd_cot = next((i for i, h in enumerate(head) if la_nd(h)), None)
+    da_cot = next((i for i, h in enumerate(head) if la_du_an(h)), None)
     out = []
     from .models import tach_sdt
     for r in rows[hi + 1:]:
@@ -314,7 +324,8 @@ def doc_file(data):
             sdt = cac_so[0]
         if sdt:
             out.append({"sdt": sdt, "ten": r[ten_cot] if ten_cot is not None and ten_cot < len(r) else "",
-                        "noiDung": r[nd_cot] if nd_cot is not None and nd_cot < len(r) else ""})
+                        "noiDung": r[nd_cot] if nd_cot is not None and nd_cot < len(r) else "",
+                        "duAn": r[da_cot] if da_cot is not None and da_cot < len(r) else ""})
     return out
 
 
@@ -334,8 +345,9 @@ def doc_van_ban(text):
 
 
 @transaction.atomic
-def nhap_them(rows, phu_trach=None):
-    """Thêm số vào cuối danh sách, bỏ qua số đã có. Trả về (số đã thêm, số trùng)."""
+def nhap_them(rows, phu_trach=None, du_an=""):
+    """Thêm số vào cuối danh sách, bỏ qua số đã có. Trả về (số đã thêm, số trùng).
+    du_an: tên dự án gán cho các dòng không có cột Dự án."""
     da_co = set(NguoiNhan.objects.exclude(sdt__isnull=True).values_list("sdt", flat=True))
     base = NguoiNhan.objects.aggregate(m=Max("thu_tu"))["m"] or 0
     moi, trung = [], 0
@@ -348,7 +360,7 @@ def nhap_them(rows, phu_trach=None):
             da_co.add(sdt)
         moi.append(NguoiNhan(thu_tu=base + len(moi) + 1, sdt_goc=str(r.get("sdt") or "").strip()[:32], sdt=sdt,
                              ten=str(r.get("ten") or "").strip()[:255], noi_dung=str(r.get("noiDung") or "").strip()[:5000],
-                             phu_trach=phu_trach))
+                             du_an=(str(r.get("duAn") or "").strip() or du_an or "")[:100], phu_trach=phu_trach))
     NguoiNhan.objects.bulk_create(moi)
     tang_phien_ban()
     return len(moi), trung

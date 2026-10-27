@@ -54,11 +54,16 @@
               <div class="spacer"></div>
               <button class="btn sm danger" id="btnClearList">Xoá hết</button>
             </div>
-            <p class="hint">File Excel gồm 3 cột: <b>SĐT</b>, <b>Họ tên</b>, <b>Nội dung</b>. Ô Nội dung để trống thì gửi nội dung mặc định. Dùng <b>{ten}</b> để chèn họ tên. Số đã gửi sẽ tự bỏ qua.</p>
+            <div class="toolbar">
+              <label class="hint" for="duAnAll"><b>Dự án</b></label>
+              <input type="text" class="search" id="duAnAll" maxlength="100" placeholder="VD: Palm City">
+              <button class="btn sm" id="btnDuAnAll">Gán cho các số chưa có dự án</button>
+            </div>
+            <p class="hint">File Excel gồm các cột: <b>SĐT</b>, <b>Họ tên</b>, <b>Nội dung</b>, <b>Dự án</b>. Ô Nội dung để trống thì gửi nội dung mặc định. Dùng <b>{ten}</b> để chèn họ tên. <b>Dự án</b> được ghi vào tên gợi nhớ khi kết bạn (vd “Anh Nam 0901234567 Palm City”); số mới thêm tự nhận dự án ở ô trên nếu chưa có. Số đã gửi sẽ tự bỏ qua.</p>
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>#</th><th>Số điện thoại</th><th>Họ tên</th><th>Nội dung tin nhắn</th><th>Trạng thái</th><th></th></tr></thead>
+              <thead><tr><th>#</th><th>Số điện thoại</th><th>Họ tên</th><th>Dự án</th><th>Nội dung tin nhắn</th><th>Trạng thái</th><th></th></tr></thead>
               <tbody id="tbody"></tbody>
             </table>
             <div class="empty hidden" id="emptyList">Chưa có số nào. Bấm <b>+ Thêm dòng</b>, <b>Dán danh sách</b> hoặc <b>Nhập file Excel</b>.</div>

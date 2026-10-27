@@ -91,6 +91,7 @@ function renderTable() {
       <td class="idx">${i + 1}</td>
       <td><input class="phone" id="sdt-${i}" value="${esc(c.sdt)}" placeholder="0901234567" aria-label="Số điện thoại dòng ${i + 1}" ${locked ? "disabled" : ""}></td>
       <td><input class="name" value="${esc(c.ten)}" placeholder="Họ tên" aria-label="Họ tên dòng ${i + 1}" ${locked ? "disabled" : ""}></td>
+      <td><input class="duan" value="${esc(c.duAn)}" placeholder="${esc(config.tenDuAn || "Dự án")}" aria-label="Dự án dòng ${i + 1}" ${locked ? "disabled" : ""}></td>
       <td><textarea class="msg" rows="1" placeholder="${esc(ph)}" aria-label="Nội dung tin nhắn dòng ${i + 1}" ${locked || done ? "disabled" : ""}>${esc(c.noiDung)}</textarea></td>
       <td class="status">${statusCell(statusOf(c))}</td>
       <td class="act">${done ? `<button class="btn sm link" data-reset="${p}" ${locked ? "disabled" : ""}>Gửi lại</button>` : ""}<button class="btn sm link" data-del="${i}" aria-label="Xoá dòng ${i + 1}" ${locked ? "disabled" : ""}>Xoá</button></td>
@@ -128,7 +129,7 @@ function setDoneFrom(view) {
   doneMap = {};
   for (const c of view) if (c.sdtChuan && c.ketQua) doneMap[c.sdtChuan] = c.ketQua;
 }
-const toLocal = (view) => view.map((c) => ({ sdt: c.sdt, ten: c.ten, noiDung: c.noiDung || "" }));
+const toLocal = (view) => view.map((c) => ({ sdt: c.sdt, ten: c.ten, noiDung: c.noiDung || "", duAn: c.duAn || "" }));
 const saveContacts = debounce(async () => {
   try {
     const r = await api("/api/contacts", { contacts });
@@ -164,6 +165,7 @@ $("tbody").addEventListener("input", (e) => {
   const c = contacts[tr.dataset.i];
   if (e.target.classList.contains("phone")) c.sdt = e.target.value;
   else if (e.target.classList.contains("msg")) c.noiDung = e.target.value;
+  else if (e.target.classList.contains("duan")) c.duAn = e.target.value;
   else c.ten = e.target.value;
   tr.querySelector(".status").innerHTML = statusCell(statusOf(c));
   renderStats();
@@ -185,7 +187,7 @@ $("tbody").addEventListener("click", async (e) => {
   }
 });
 $("btnAddRow").onclick = () => {
-  contacts.push({ sdt: "", ten: "", noiDung: "" });
+  contacts.push({ sdt: "", ten: "", noiDung: "", duAn: $("duAnAll").value.trim() });
   renderTable();
   $(`sdt-${contacts.length - 1}`).focus();
 };
@@ -213,13 +215,25 @@ function addMany(rows) {
     have.add(key);
     const noiDung = String(r.noiDung || "").trim();
     if (noiDung) coNoiDung++;
-    contacts.push({ sdt: String(r.sdt).trim(), ten: String(r.ten || "").trim(), noiDung });
+    contacts.push({ sdt: String(r.sdt).trim(), ten: String(r.ten || "").trim(), noiDung,
+      duAn: String(r.duAn || "").trim() || $("duAnAll").value.trim() });
     added++;
   }
   renderTable();
   queueSave();
   info(`Đã thêm ${added} người (${coNoiDung} có nội dung riêng)${skipped ? `, bỏ qua ${skipped} số trùng` : ""}.`);
 }
+
+// Gán dự án cho các số chưa có dự án (ghi vào tên gợi nhớ khi kết bạn)
+$("btnDuAnAll").onclick = () => {
+  const duAn = $("duAnAll").value.trim();
+  if (!duAn) return showError(new Error("Nhập tên dự án vào ô Dự án trước."));
+  let n = 0;
+  for (const c of contacts) if (!String(c.duAn || "").trim() && !doneMap[normalizePhone(c.sdt)]) { c.duAn = duAn; n++; }
+  renderTable();
+  if (n) queueSave();
+  info(n ? `Đã gán dự án “${duAn}” cho ${n} số.` : "Không còn số nào chưa có dự án.", n ? "ok" : "info");
+};
 
 // Dán: mỗi dòng "SĐT, Họ tên, Nội dung" hoặc 2–3 cột copy từ Excel (Tab)
 $("btnPaste").onclick = () => { $("pasteText").value = ""; openModal("pasteModal"); $("pasteText").focus(); };
@@ -311,7 +325,7 @@ $("btnUseAdmin").onclick = () => {
 function renderRunControls() {
   const pending = pendingList().length;
   const loggedIn = st.login === "in";
-  const n = Math.min(pending, Number(config.gioiHanMoiLan) || 0);
+  const n = Math.min(pending, Number(config.gioiHanMoiLan) || Infinity);   // 0 = không giới hạn
   const mine = true;   // mỗi người gửi bằng Zalo của chính mình
   const thieu = contacts.filter((c) => statusOf(c).text === "Thiếu nội dung").length;
   $("btnStart").classList.toggle("hidden", !!st.running);
@@ -325,11 +339,11 @@ function renderRunControls() {
     : !pending ? (thieu ? `Còn ${thieu} người thiếu nội dung tin nhắn, điền nội dung để gửi.` : "Không còn số nào chờ gửi.")
     : `Lần này sẽ gửi cho ${n} người${pending > n ? ` (còn ${pending - n} người cho lần sau)` : ""}. Mỗi người cách nhau ${config.choToiThieuGiay}–${config.choToiDaGiay} giây.${config.nghiSauSoLan ? ` Cứ ${config.nghiSauSoLan} người nghỉ ${config.nghiPhut} phút.` : ""}${thieu ? ` ${thieu} người thiếu nội dung sẽ được bỏ qua.` : ""}`;
   if (st.running) $("confirmBox").classList.add("hidden");
-  ["btnAddRow", "btnPaste", "btnImport", "btnClearList", "btnInsertTen", "btnAddMau", "btnUseAdmin"].forEach((id) => ($(id).disabled = !!st.running));
+  ["btnAddRow", "btnPaste", "btnImport", "btnClearList", "btnInsertTen", "btnAddMau", "btnUseAdmin", "btnDuAnAll", "duAnAll"].forEach((id) => ($(id).disabled = !!st.running));
   $("myMsg").disabled = !!st.running;
 }
 $("btnStart").onclick = () => {
-  const n = Math.min(pendingList().length, Number(config.gioiHanMoiLan) || 0);
+  const n = Math.min(pendingList().length, Number(config.gioiHanMoiLan) || Infinity);
   const what = [config.guiKetBan && "lời mời kết bạn", config.guiTinNhan && "tin nhắn"].filter(Boolean).join(" rồi ");
   $("confirmText").innerHTML = `Tự động gửi ${esc(what)} cho <b>${n} người</b> trong danh sách của bạn?`;
   $("confirmBox").classList.remove("hidden");

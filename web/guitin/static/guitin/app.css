@@ -72,6 +72,7 @@ td input:hover { border-color: var(--line); }
 td input:focus { border-color: var(--accent); background: var(--surface); outline: none; }
 td input.phone { font-family: var(--mono); min-width: 120px; }
 td input.name { min-width: 120px; }
+td input.duan { min-width: 110px; }
 td.act { white-space: nowrap; text-align: right; width: 1%; }
 tr.current { background: var(--accent-soft); }
 .empty { padding: 36px 16px; text-align: center; color: var(--muted); }

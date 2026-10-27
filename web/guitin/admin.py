@@ -116,6 +116,9 @@ class NhapDanhSachForm(forms.Form):
                           help_text="Mỗi dòng một người: SĐT, Họ tên, Nội dung tin nhắn. Có thể copy thẳng 2–3 cột từ Excel.")
     phu_trach = forms.ModelChoiceField(label="Giao cho nhân viên", required=False, queryset=NguoiDung.objects.none(),
                                        empty_label="Chưa giao (giao sau)")
+    du_an = forms.CharField(label="Dự án", required=False, max_length=100,
+                            help_text="Ví dụ: Palm City. Ghi vào tên gợi nhớ của các số trong lần nhập này "
+                                      "(dòng nào trong file có cột Dự án thì dùng giá trị của dòng đó).")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -132,12 +135,12 @@ class NhapDanhSachForm(forms.Form):
 @admin.register(NguoiNhan)
 class NguoiNhanAdmin(admin.ModelAdmin):
     change_list_template = "admin/guitin/nguoinhan/change_list.html"
-    list_display = ("sdt_goc", "ten", "noi_dung_ngan", "phu_trach", "trang_thai", "tao_luc")
+    list_display = ("sdt_goc", "ten", "du_an", "noi_dung_ngan", "phu_trach", "trang_thai", "tao_luc")
     list_editable = ("phu_trach",)
-    list_filter = ("phu_trach", TrangThaiFilter)
-    search_fields = ("sdt_goc", "sdt", "ten", "noi_dung")
+    list_filter = ("phu_trach", "du_an", TrangThaiFilter)
+    search_fields = ("sdt_goc", "sdt", "ten", "noi_dung", "du_an")
     list_per_page = 100
-    fields = ("sdt_goc", "ten", "noi_dung", "phu_trach", "thu_tu")
+    fields = ("sdt_goc", "ten", "du_an", "noi_dung", "phu_trach", "thu_tu")
 
     @admin.display(description="Nội dung riêng")
     def noi_dung_ngan(self, obj):
@@ -194,8 +197,9 @@ class NguoiNhanAdmin(admin.ModelAdmin):
                 if not rows:
                     raise ValueError("Không đọc được số nào. Kiểm tra lại file hoặc nội dung đã dán.")
                 nv = form.cleaned_data["phu_trach"]
-                them, trung = sv.nhap_them(rows, nv)
-                giao = f", giao cho {nv}" if nv else " (chưa giao cho ai)"
+                du_an = form.cleaned_data["du_an"].strip()
+                them, trung = sv.nhap_them(rows, nv, du_an)
+                giao = (f", giao cho {nv}" if nv else " (chưa giao cho ai)") + (f", dự án {du_an}" if du_an else "")
                 sv.ghi_log(f"{request.user} đã nhập {them} số{giao}.", "ok", request.user)
                 self.message_user(request, f"Đã thêm {them} số{giao}." + (f" Bỏ qua {trung} số đã có trong danh sách." if trung else ""))
                 return redirect(reverse("admin:guitin_nguoinhan_changelist"))
@@ -392,7 +396,7 @@ class CaiDatAdmin(admin.ModelAdmin):
     fieldsets = (
         ("Nội dung", {"fields": ("loi_moi_ket_ban", "noi_dung_tin_nhan")}),
         ("Gửi gì", {"fields": ("gui_ket_ban", "gui_tin_nhan")}),
-        ("Tên gợi nhớ khi kết bạn", {"fields": ("doi_ten_goi_nho", "mau_ten_goi_nho"),
+        ("Tên gợi nhớ khi kết bạn", {"fields": ("doi_ten_goi_nho", "mau_ten_goi_nho", "ten_du_an"),
                                      "description": "Sau khi gửi lời mời kết bạn, tool đặt tên gợi nhớ cho người đó trong Zalo của người gửi."}),
         ("Giới hạn an toàn", {"fields": ("gioi_han_moi_lan", "cho_toi_thieu_giay", "cho_toi_da_giay"),
                               "description": "Nên giữ 20–30 người mỗi ngày và chờ từ 60 giây trở lên để tránh bị Zalo khoá tài khoản. "

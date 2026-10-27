@@ -17,7 +17,7 @@ export function sanitizeConfig(c = {}) {
   const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
   const min = Math.max(30, num(c.choToiThieuGiay, 60));
   return {
-    gioiHanMoiLan: Math.min(50, Math.max(1, Math.round(num(c.gioiHanMoiLan, 20)))),
+    gioiHanMoiLan: Math.max(0, Math.round(num(c.gioiHanMoiLan, 0))),     // 0 = không giới hạn
     choToiThieuGiay: min,
     choToiDaGiay: Math.max(min, num(c.choToiDaGiay, 150)),
     guiKetBan: c.guiKetBan !== false,
@@ -58,8 +58,9 @@ export function spin(text) {
 
 // Tên gợi nhớ: {ten} {sdt}, không có tên thì chỉ còn SĐT
 export const tenGoiNho = (tpl, row) =>
-  (tpl || "{ten} {sdt}").replace(/\{ten\}/gi, row.ten || "").replace(/\{sdt\}/gi, row.sdt || "")
-    .replace(/\s+/g, " ").replace(/^[\s\-–|,.:]+|[\s\-–|,.:]+$/g, "").slice(0, 60) || row.sdt;
+  (tpl || "{ten} {sdt} {duan}").replace(/\{ten\}/gi, row.ten || "").replace(/\{sdt\}/gi, row.sdt || "")
+    .replace(/\{duan\}/gi, row.duAn || "")
+    .replace(/\s+/g, " ").replace(/^[\s\-–|,.:]+|[\s\-–|,.:]+$/g, "").slice(0, 80) || row.sdt;
 
 // ---------- ảnh đính kèm ----------
 // Loại ảnh và kích thước (Zalo cần width/height khi gửi ảnh từ Buffer). null nếu không phải ảnh hỗ trợ.

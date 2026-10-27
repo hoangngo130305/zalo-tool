@@ -171,6 +171,8 @@ class NguoiNhan(models.Model):
     ten = models.CharField("Tên", max_length=255, blank=True)
     noi_dung = models.TextField("Nội dung tin nhắn riêng", blank=True,
                                 help_text="Để trống thì dùng nội dung mặc định trong Cài đặt gửi tin. Có thể dùng {ten}. " + HD_XAO)
+    du_an = models.CharField("Dự án", max_length=100, blank=True, db_index=True,
+                             help_text="Ghi vào tên gợi nhớ ({duan}). Để trống thì dùng tên dự án mặc định trong Cài đặt gửi tin.")
     phu_trach = models.ForeignKey(
         NguoiDung, verbose_name="Nhân viên phụ trách", null=True, blank=True, on_delete=models.SET_NULL,
         related_name="nguoi_nhan", limit_choices_to={"vai_tro__in": [NguoiDung.QUAN_TRI, NguoiDung.NHAN_VIEN]},
@@ -253,8 +255,10 @@ class CaiDat(models.Model):
                                          help_text="{ten} sẽ được thay bằng tên từng người. " + HD_XAO)
     gui_ket_ban = models.BooleanField("Gửi lời mời kết bạn", default=True)
     gui_tin_nhan = models.BooleanField("Gửi tin nhắn", default=True)
-    gioi_han_moi_lan = models.PositiveSmallIntegerField("Số người tối đa mỗi lần", default=20,
-                                                         validators=[MinValueValidator(1), MaxValueValidator(50)])
+    gioi_han_moi_lan = models.PositiveIntegerField(
+        "Số người tối đa mỗi lần", default=0,
+        help_text="0 = không giới hạn: bấm gửi một lần là tool gửi hết danh sách chờ. "
+                  "Nên bật “Nghỉ giữa các lượt” để tool tự nghỉ sau mỗi X người.")
     cho_toi_thieu_giay = models.PositiveIntegerField("Chờ tối thiểu (giây)", default=60, validators=[MinValueValidator(30)],
                                                       help_text="Không cho dưới 30 giây để tránh bị Zalo khoá tài khoản.")
     cho_toi_da_giay = models.PositiveIntegerField("Chờ tối đa (giây)", default=150, validators=[MinValueValidator(30)])
@@ -265,8 +269,10 @@ class CaiDat(models.Model):
                                                  validators=[MinValueValidator(1), MaxValueValidator(240)])
     doi_ten_goi_nho = models.BooleanField("Đổi tên gợi nhớ khi kết bạn", default=True,
                                           help_text="Đặt tên gợi nhớ (biệt danh) cho người được mời kết bạn, để dễ tìm lại trong Zalo.")
-    mau_ten_goi_nho = models.CharField("Mẫu tên gợi nhớ", max_length=100, default="{ten} {sdt}",
-                                       help_text="{ten} = họ tên trong danh sách, {sdt} = số điện thoại. Ví dụ: “{ten} {sdt}” → “Anh Nam 0901234567”.")
+    ten_du_an = models.CharField("Tên dự án mặc định", max_length=100, blank=True,
+                                 help_text="Dùng cho {duan} khi số điện thoại chưa có dự án riêng (cột Dự án trong danh sách).")
+    mau_ten_goi_nho = models.CharField("Mẫu tên gợi nhớ", max_length=100, default="{ten} {sdt} {duan}",
+                                       help_text="{ten} = họ tên, {sdt} = số điện thoại, {duan} = tên dự án. Ví dụ: “{ten} {sdt} {duan}” → “Anh Nam 0901234567 Palm City”.")
 
     class Meta:
         verbose_name = "cài đặt gửi tin"
@@ -279,7 +285,7 @@ class CaiDat(models.Model):
     def save(self, *args, **kwargs):
         # Luôn chỉ có 1 dòng, và luôn giữ giới hạn an toàn
         self.pk = 1
-        self.gioi_han_moi_lan = min(50, max(1, int(self.gioi_han_moi_lan or 20)))
+        self.gioi_han_moi_lan = max(0, int(self.gioi_han_moi_lan or 0))     # 0 = không giới hạn
         self.cho_toi_thieu_giay = max(30, int(self.cho_toi_thieu_giay or 60))
         self.cho_toi_da_giay = max(self.cho_toi_thieu_giay, int(self.cho_toi_da_giay or 150))
         self.nghi_sau_so_lan = min(1000, max(0, int(self.nghi_sau_so_lan or 0)))
@@ -297,7 +303,7 @@ class CaiDat(models.Model):
             "gioiHanMoiLan": self.gioi_han_moi_lan,
             "choToiThieuGiay": self.cho_toi_thieu_giay, "choToiDaGiay": self.cho_toi_da_giay,
             "nghiSauSoLan": self.nghi_sau_so_lan, "nghiPhut": self.nghi_phut,
-            "doiTenGoiNho": self.doi_ten_goi_nho, "mauTenGoiNho": self.mau_ten_goi_nho,
+            "doiTenGoiNho": self.doi_ten_goi_nho, "mauTenGoiNho": self.mau_ten_goi_nho, "tenDuAn": self.ten_du_an,
             # Ảnh gửi kèm tin nhắn cho từng khách (đường dẫn trong data/, worker tự đọc)
             "anh": [f"{THU_MUC_ANH_TIN_NHAN}/{a.tep.name}" for a in self.anh.all()],
         }

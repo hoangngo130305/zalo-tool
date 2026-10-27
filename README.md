@@ -69,9 +69,13 @@ Trang **/gui-nhom/** (nhân viên: tab **Gửi vào nhóm Zalo**; quản trị: 
 ### Thời gian chờ, nghỉ giữa lượt, tên gợi nhớ (/admin/ → Cài đặt gửi tin)
 - **Chờ tối thiểu / tối đa**: thời gian chờ ngẫu nhiên giữa 2 lần gửi (gửi từng người và gửi nhóm).
 - **Nghỉ sau mỗi X lần gửi, nghỉ Y phút**: ví dụ 5 và 15 = cứ gửi xong 5 người (hoặc 5 nhóm) thì nghỉ 15 phút. 0 = không nghỉ.
-- **Đổi tên gợi nhớ khi kết bạn**: sau khi gửi lời mời, tool đặt tên gợi nhớ theo mẫu (mặc định `{ten} {sdt}`,
-  vd “Anh Nam 0901234567”). Zalo có thể không cho đổi tên người chưa là bạn, khi đó lỗi được ghi ở cột Ghi chú,
+- **Đổi tên gợi nhớ khi kết bạn**: sau khi gửi lời mời, tool đặt tên gợi nhớ theo mẫu (mặc định `{ten} {sdt} {duan}`,
+  vd “Anh Nam 0901234567 Palm City”). Zalo có thể không cho đổi tên người chưa là bạn, khi đó lỗi được ghi ở cột Ghi chú,
   tin nhắn vẫn gửi bình thường.
+- **Dự án** (`{duan}`): mỗi số có thể có dự án riêng (cột *Dự án* trong file Excel, ô *Dự án* khi quản trị nhập danh sách,
+  hoặc cột Dự án trên trang nhân viên). Số chưa có dự án dùng **Tên dự án mặc định** trong Cài đặt gửi tin.
+- **Số người tối đa mỗi lần**: để `0` là không giới hạn, bấm gửi một lần là gửi hết danh sách chờ. Nên bật
+  **Nghỉ giữa các lượt** để tool tự nghỉ sau mỗi X người.
 
 ### Ảnh kèm tin nhắn khách, xáo nội dung
 - **Ảnh kèm tin nhắn khách**: /admin/ → Cài đặt gửi tin → mục **Hình ảnh gửi kèm tin nhắn** (tối đa 10 ảnh JPG/PNG/WEBP,
@@ -110,7 +114,7 @@ Lưu trong database MySQL `zalo_tool`, xem bằng /admin/ hoặc phpMyAdmin. Cá
 ## Lưu ý quan trọng
 - Tool dùng thư viện **không chính thức** `zca-js` (giả lập Zalo Web). Zalo giới hạn số lời mời
   kết bạn/ngày và có thể **khoá tính năng hoặc khoá tài khoản** nếu gửi nhiều cho người lạ.
-  Nên dùng tài khoản phụ, giữ khoảng **20–30 người/ngày**, không giảm thời gian chờ. Tool luôn giới hạn
-  tối đa 50 người mỗi lần và chờ ít nhất 30 giây giữa 2 người.
+  Nên dùng tài khoản phụ, giữ khoảng **20–30 người/ngày**, không giảm thời gian chờ. Tool luôn chờ ít nhất
+  30 giây giữa 2 người; khi bỏ giới hạn số người mỗi lần, nên bật nghỉ giữa các lượt.
 - Người nhận đặt "chặn tin nhắn từ người lạ" sẽ không nhận được tin cho tới khi đồng ý kết bạn.
 - Đang chạy thì **không đăng nhập Zalo Web ở trình duyệt khác** (sẽ bị đẩy phiên).

@@ -181,7 +181,7 @@ def api_preview(request):
         out.append({
             "sdt": r.sdt, "ten": r.ten,
             "loiMoi": sv.xao(loi_moi) if cfg.gui_ket_ban else None, "soMauLoiMoi": len(sv.cac_mau(loi_moi)),
-            "tenGoiNho": sv.ten_goi_nho(cfg.mau_ten_goi_nho, r.ten, r.sdt) if cfg.doi_ten_goi_nho else None,
+            "tenGoiNho": sv.ten_goi_nho(cfg.mau_ten_goi_nho, r.ten, r.sdt, sv.du_an_cua(r, cfg)) if cfg.doi_ten_goi_nho else None,
             "tinNhan": sv.xao(tin) if cfg.gui_tin_nhan else None, "soMauTinNhan": len(sv.cac_mau(tin)),
             "soAnh": so_anh,
         })
@@ -269,7 +269,8 @@ def api_start(request):
     worker.goi("POST", "/run", {
         "uid": u.id,
         # Gửi kèm nội dung đã điền sẵn cho từng người (nội dung riêng hoặc mặc định)
-        "batch": [{"sdt": r.sdt, "ten": r.ten, "noiDung": sv.noi_dung_gui(r, cfg)} for r in batch],
+        "batch": [{"sdt": r.sdt, "ten": r.ten, "noiDung": sv.noi_dung_gui(r, cfg), "duAn": sv.du_an_cua(r, cfg)}
+                  for r in batch],
         "cfg": cfg.to_dict(),
         "runBy": {"id": u.id, "name": str(u)},
     })
@@ -324,19 +325,20 @@ def file_mau(request):
     wb = Workbook()
     ws = wb.active
     ws.title = "DanhSach"
-    ws.append(["SĐT", "Họ tên", "Nội dung"])
-    ws.append(["0901234567", "Anh Nam", "Chào {ten}, em gửi anh thông tin chương trình tháng này ạ."])
-    ws.append(["0912345678", "Chị Lan", ""])
+    ws.append(["SĐT", "Họ tên", "Nội dung", "Dự án"])
+    ws.append(["0901234567", "Anh Nam", "Chào {ten}, em gửi anh thông tin chương trình tháng này ạ.", "Palm City"])
+    ws.append(["0912345678", "Chị Lan", "", "Global City"])
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor="1F5FC4")
     for r in (2, 3):
         ws.cell(r, 1).number_format = "@"   # giữ số 0 đầu
         ws.cell(r, 3).alignment = Alignment(wrap_text=True, vertical="top")
-    ws["E1"] = "Ghi chú"
-    ws["E2"] = "{ten} sẽ được thay bằng họ tên. Để trống Nội dung thì gửi nội dung mặc định."
-    ws["E1"].font = Font(bold=True)
-    for col, w in zip("ABCDE", (14, 22, 60, 2, 50)):
+    ws["F1"] = "Ghi chú"
+    ws["F2"] = "{ten} sẽ được thay bằng họ tên. Để trống Nội dung thì gửi nội dung mặc định."
+    ws["F3"] = "Dự án được ghi vào tên gợi nhớ khi kết bạn. Để trống thì dùng dự án mặc định của quản trị."
+    ws["F1"].font = Font(bold=True)
+    for col, w in zip("ABCDEF", (14, 22, 60, 18, 2, 60)):
         ws.column_dimensions[col].width = w
     buf = io.BytesIO()
     wb.save(buf)

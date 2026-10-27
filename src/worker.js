@@ -183,8 +183,9 @@ function startRun(a, { batch, cfg, runBy }) {
   const dangGui = new Set([...accounts.values()].filter((x) => x !== a && x.running).flatMap((x) => x.pending));
   batch = (Array.isArray(batch) ? batch : [])
     .filter((r) => /^0\d{9}$/.test(String(r?.sdt)) && !dangGui.has(String(r.sdt)))
-    .slice(0, cfg.gioiHanMoiLan)
-    .map((r) => ({ sdt: String(r.sdt), ten: String(r.ten ?? ""), noiDung: String(r.noiDung ?? "").slice(0, 5000) }));
+    .slice(0, cfg.gioiHanMoiLan || undefined)      // 0 = không giới hạn
+    .map((r) => ({ sdt: String(r.sdt), ten: String(r.ten ?? ""), noiDung: String(r.noiDung ?? "").slice(0, 5000),
+      duAn: String(r.duAn ?? "").slice(0, 100) }));
   if (!batch.length) throw new Error("Không có số nào để gửi (các số còn lại đang được người khác gửi)");
   // Ảnh gửi kèm tin nhắn (quản trị cài), đọc 1 lần cho cả đợt
   const attachments = cfg.guiTinNhan ? loadAttachments(cfg.anh) : [];
@@ -252,7 +253,7 @@ const send = (res, code, body) => {
 const readJson = (req) => new Promise((resolve, reject) => {
   const chunks = [];
   let size = 0;
-  req.on("data", (c) => { size += c.length; if (size > 2_000_000) req.destroy(); else chunks.push(c); });
+  req.on("data", (c) => { size += c.length; if (size > 50_000_000) req.destroy(); else chunks.push(c); });
   req.on("end", () => { try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}); } catch (e) { reject(e); } });
   req.on("error", reject);
 });
