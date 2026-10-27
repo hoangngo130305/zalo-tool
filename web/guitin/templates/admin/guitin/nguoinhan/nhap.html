@@ -19,10 +19,13 @@
         <div class="form-group">
           <label for="{{ field.id_for_label }}"><b>{{ field.label }}</b></label>
           {% if field.name == "tep" %}
-            <input type="file" name="tep" id="{{ field.id_for_label }}" accept=".xlsx,.csv" class="form-control-file">
+            <input type="file" name="tep" id="{{ field.id_for_label }}" accept=".xlsx,.xls,.csv" class="form-control-file">
           {% elif field.name == "dan" %}
             <textarea name="dan" id="{{ field.id_for_label }}" rows="8" class="form-control" style="font-family:Consolas,monospace"
                       placeholder="0901234567, Anh Nam, Chào anh Nam, bên em có ưu đãi...&#10;0912345678	Chị Lan	Chào chị Lan...">{{ field.value|default:"" }}</textarea>
+          {% elif field.name == "du_an" %}
+            <input type="text" name="du_an" id="{{ field.id_for_label }}" value="{{ field.value|default:"" }}" maxlength="100"
+                   class="form-control" style="max-width:360px" placeholder="VD: Palm City">
           {% else %}
             <select name="{{ field.html_name }}" id="{{ field.id_for_label }}" class="form-control" style="max-width:360px">
               {% for value, label in field.field.choices %}
@@ -46,10 +49,13 @@
       <div class="card-header"><h3 class="card-title">Lưu ý</h3></div>
       <div class="card-body small">
         <ul class="pl-3 mb-0">
-          <li>Số dạng 84…, +84… hoặc bị mất số 0 đầu đều được tự sửa.</li>
+          <li>Nhận file <b>.xlsx</b>, <b>.xls</b> (Excel 97-2003) và <b>.csv</b>. Dòng tên cột không cần nằm ở dòng đầu.</li>
+          <li>Số dạng 84…, +84… hoặc bị mất số 0 đầu đều được tự sửa. Số 11 chữ số đầu cũ (0162…, 0120…) được đổi sang đầu số mới.</li>
+          <li>Ô ghi nhiều số (090… - 091…) thì lấy số đầu tiên.</li>
           <li>Số đã có trong danh sách sẽ được bỏ qua, không thêm trùng.</li>
           <li>Cột <b>Nội dung</b> là tin nhắn riêng cho từng người, dùng được <b>{ten}</b>. Dòng nào để trống thì gửi nội dung mặc định trong “Cài đặt gửi tin”.</li>
           <li>Chọn “Chưa giao” nếu muốn chia sau: vào Người nhận, chọn các dòng, rồi chọn thao tác “Giao … cho …” hoặc “Chia đều”.</li>
+          <li><b>Dự án</b> được ghi vào tên gợi nhớ khi kết bạn (vd “Anh Nam 0901234567 Palm City”). File có cột <b>Dự án</b> thì dòng đó dùng dự án của mình.</li>
           <li>Nhân viên chỉ thấy và chỉ gửi các số được giao cho mình.</li>
         </ul>
       </div>
