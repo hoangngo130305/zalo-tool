@@ -112,6 +112,12 @@ def ten_goi_nho(tpl, ten, sdt, du_an=""):
     return " ".join(s.split()).strip(" -–|,.:")[:80] or sdt
 
 
+def loi_moi_gui(r, cfg):
+    """Mẫu lời mời kết bạn cho 1 người (chưa thay {ten}): lời mời của nhân viên phụ trách, trống thì của quản trị."""
+    cua_nv = r.phu_trach.loi_moi_ket_ban if r.phu_trach_id and r.phu_trach else ""
+    return cua_nv or cfg.loi_moi_ket_ban
+
+
 def noi_dung_gui(r, cfg):
     """Nội dung tin nhắn sẽ gửi cho 1 người, theo thứ tự ưu tiên:
     nội dung riêng của dòng -> tin nhắn mặc định của nhân viên phụ trách -> nội dung mặc định của quản trị."""
@@ -510,6 +516,46 @@ def xoa_anh(user, cau_hinh, ten):
     cau_hinh.anh = [a for a in cau_hinh.anh if a != ten]
     cau_hinh.save(update_fields=["anh", "cap_nhat"])
     (thu_muc_anh(user) / ten).unlink(missing_ok=True)
+
+
+# ---------- ảnh gửi kèm tin nhắn của từng nhân viên ----------
+def thu_muc_anh_nv(user):
+    """data/anh-tin-nhan/nv-<id>/ (nằm trong thư mục ảnh worker được phép đọc)."""
+    from django.conf import settings
+    return settings.ROOT_DIR / "data" / "anh-tin-nhan" / f"nv-{int(user.id)}"
+
+
+def luu_anh_nv(user, f):
+    import uuid
+    if len(user.anh_tin_nhan) >= ANH_TOI_DA:
+        raise ValueError(f"Tối đa {ANH_TOI_DA} ảnh")
+    if f.size > ANH_TOI_DA_MB * 1024 * 1024:
+        raise ValueError(f"Ảnh “{f.name}” lớn hơn {ANH_TOI_DA_MB} MB")
+    data = f.read()
+    ext = loai_anh(data)
+    if not ext:
+        raise ValueError(f"“{f.name}” không phải ảnh JPG, PNG hoặc WEBP")
+    thu_muc = thu_muc_anh_nv(user)
+    thu_muc.mkdir(parents=True, exist_ok=True)
+    ten = f"{uuid.uuid4().hex}.{ext}"
+    (thu_muc / ten).write_bytes(data)
+    user.anh_tin_nhan = [*user.anh_tin_nhan, ten]
+    user.save(update_fields=["anh_tin_nhan"])
+
+
+def xoa_anh_nv(user, ten):
+    if ten not in user.anh_tin_nhan:
+        raise ValueError("Không tìm thấy ảnh")
+    user.anh_tin_nhan = [a for a in user.anh_tin_nhan if a != ten]
+    user.save(update_fields=["anh_tin_nhan"])
+    (thu_muc_anh_nv(user) / ten).unlink(missing_ok=True)
+
+
+def anh_gui_kem(user, cfg):
+    """Ảnh gửi kèm tin nhắn khi user bấm gửi: ảnh riêng của user, chưa có thì ảnh của quản trị (đường dẫn trong data/)."""
+    if user.anh_tin_nhan:
+        return [f"anh-tin-nhan/nv-{int(user.id)}/{a}" for a in user.anh_tin_nhan]
+    return cfg.to_dict()["anh"]
 
 
 def cau_hinh_nhom_dict(c):

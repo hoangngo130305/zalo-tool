@@ -129,6 +129,12 @@ class NguoiDung(AbstractUser):
         "Tin nhắn mặc định của nhân viên", blank=True,
         help_text="Nhân viên tự soạn trên trang gửi tin. Dùng cho các số không có nội dung riêng; "
                   "để trống thì dùng nội dung mặc định trong Cài đặt gửi tin. " + HD_XAO)
+    loi_moi_ket_ban = models.TextField(
+        "Lời mời kết bạn của nhân viên", blank=True,
+        help_text="Nhân viên tự soạn trên trang gửi tin. Để trống thì dùng lời mời kết bạn trong Cài đặt gửi tin. " + HD_XAO)
+    anh_tin_nhan = models.JSONField(
+        "Ảnh gửi kèm tin nhắn của nhân viên", default=list, blank=True,
+        help_text="Nhân viên tự chọn trên trang gửi tin (data/anh-tin-nhan/nv-<id>/). Để trống thì dùng ảnh trong Cài đặt gửi tin.")
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["ho_ten"]

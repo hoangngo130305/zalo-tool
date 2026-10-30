@@ -38,7 +38,7 @@ class NguoiDungAdmin(UserAdmin):
     search_fields = ("email", "ho_ten")
     fieldsets = (
         ("Thông tin", {"fields": ("email", "ho_ten", "password")}),
-        ("Tin nhắn", {"fields": ("tin_nhan_mac_dinh",)}),
+        ("Tin nhắn", {"fields": ("tin_nhan_mac_dinh", "loi_moi_ket_ban")}),
         ("Phân quyền", {"fields": ("vai_tro", "is_active"),
                         "description": "Quản trị: toàn quyền, vào được trang này. Nhân viên: chỉ thấy và gửi các số được giao. "
                                        "Chỉ xem: xem tiến độ và báo cáo, không sửa được gì. Bỏ chọn “Hoạt động” để khoá tài khoản."}),

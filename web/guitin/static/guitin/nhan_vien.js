@@ -5,6 +5,8 @@ let contacts = [];        // [{ sdt, ten, noiDung }] các số của mình
 let doneMap = {};         // sdtChuan -> kết quả mới nhất
 let config = {};
 let myDefault = "";       // tin nhắn mặc định của tôi (để trống = dùng nội dung của quản trị)
+let myInvite = "";        // lời mời kết bạn của tôi (để trống = dùng lời mời của quản trị)
+let myImages = [];        // ảnh gửi kèm tin nhắn của tôi (trống = dùng ảnh của quản trị)
 let st = {};              // trạng thái gửi (từ server)
 let version = null;       // phiên bản danh sách trên server
 let lastLogId = 0;
@@ -40,8 +42,9 @@ const info = (text, level = "ok") => addLog({ t: now(), text, level });
 async function api(path, body, opts = {}) {
   const res = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
-    headers: { "Content-Type": opts.raw ? "application/octet-stream" : "application/json", "X-CSRFToken": csrfToken() },
-    body: opts.raw ? body : body === undefined ? undefined : JSON.stringify(body),
+    headers: body instanceof FormData ? { "X-CSRFToken": csrfToken() }
+      : { "Content-Type": opts.raw ? "application/octet-stream" : "application/json", "X-CSRFToken": csrfToken() },
+    body: opts.raw || body instanceof FormData ? body : body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) location.href = "/dang-nhap/?next=/";
@@ -145,12 +148,15 @@ function queueSave() { listDirty = true; saveContacts(); }
 // Quản trị viên vừa giao thêm số, sửa nội dung mặc định, hoặc có kết quả mới: tải lại
 async function reloadContacts() {
   if (listDirty) return;
+  const seq = imgSeq;   // có thao tác ảnh trong lúc tải lại thì bỏ danh sách ảnh cũ nhận được
   try {
     const r = await api("/api/contacts");
     if (listDirty) return;
     version = r.version;
     config = r.config || config;
     if (!myDirty && r.tinNhanCuaToi !== undefined) { myDefault = r.tinNhanCuaToi; if (document.activeElement !== $("myMsg")) $("myMsg").value = myDefault; }
+    if (!inviteDirty && r.loiMoiCuaToi !== undefined) { myInvite = r.loiMoiCuaToi; if (document.activeElement !== $("myInvite")) $("myInvite").value = myInvite; }
+    if (r.anhCuaToi && !imgBusy && seq === imgSeq) { myImages = r.anhCuaToi; renderMyImages(); }
     const focused = document.activeElement?.closest?.("#tbody");
     contacts = toLocal(r.contacts);
     setDoneFrom(r.contacts);
@@ -278,13 +284,22 @@ function renderPreview() {
   $("myMsgCount").textContent = (myDefault ? `${myDefault.length} ký tự` : "đang dùng nội dung của quản trị")
     + (soMau > 1 ? ` · ${soMau} mẫu, xáo ngẫu nhiên` : "");
   $("btnUseAdmin").classList.toggle("hidden", !myDefault);
-  const soAnh = (config.anh || []).length;
+  const soAnh = myImages.length || (config.anh || []).length;   // ảnh của tôi, chưa có thì ảnh của quản trị
   $("pvMsgLabel").textContent = `Xem trước tin nhắn (ví dụ cho "${ten}")`
     + (soMau > 1 ? `, mẫu 1/${soMau}` : "") + (soAnh && config.guiTinNhan ? `, kèm ${soAnh} ảnh` : "");
   $("pvMsg").textContent = !config.guiTinNhan ? "(quản trị đang tắt gửi tin nhắn)"
     : baseMsg() ? fill(cacMau(baseMsg())[0] || "", ten) : "(chưa có nội dung, soạn tin nhắn ở ô trên hoặc nhập nội dung riêng cho từng người)";
-  const mauLoiMoi = cacMau(config.loiMoiKetBan);
-  $("pvLabel").textContent = "Lời mời kết bạn (do quản trị soạn)" + (mauLoiMoi.length > 1 ? `, mẫu 1/${mauLoiMoi.length}` : "");
+  const mauLoiMoi = cacMau(myInvite || config.loiMoiKetBan);
+  $("pvLabel").textContent = (myInvite ? "Lời mời kết bạn của tôi" : "Lời mời kết bạn (của quản trị)")
+    + (mauLoiMoi.length > 1 ? `, mẫu 1/${mauLoiMoi.length}` : "");
+  $("myInvite").placeholder = config.loiMoiKetBan
+    ? `Để trống sẽ dùng lời mời của quản trị:\n${config.loiMoiKetBan}` : "Soạn lời mời kết bạn của bạn...";
+  const soMauMoi = cacMau(myInvite).length;
+  const dai = cacMau(myInvite).some((m) => m.length > 150);
+  $("myInviteCount").textContent = (myInvite ? `${myInvite.length} ký tự` : "đang dùng lời mời của quản trị")
+    + (soMauMoi > 1 ? ` · ${soMauMoi} mẫu, xáo ngẫu nhiên` : "") + (dai ? " · có mẫu dài hơn 150 ký tự" : "");
+  $("myInviteCount").classList.toggle("over", dai);
+  $("btnUseAdminInvite").classList.toggle("hidden", !myInvite);
   $("pvInvite").textContent = config.guiKetBan ? fill(mauLoiMoi[0] || "", ten) : "(không gửi lời mời kết bạn)";
 }
 const saveMyMsg = debounce(async () => {
@@ -321,6 +336,87 @@ $("btnUseAdmin").onclick = () => {
   $("myMsg").dispatchEvent(new Event("input"));
 };
 
+// ---------- lời mời kết bạn của tôi ----------
+let inviteDirty = false;
+const saveMyInvite = debounce(async () => {
+  try {
+    const r = await api("/api/loi-moi-cua-toi", { loiMoi: $("myInvite").value });
+    inviteDirty = false;
+    version = r.version;
+    flash("myMsgSaved", "Đã lưu");
+  } catch (e) { showError(e); }
+}, 700);
+$("myInvite").addEventListener("input", () => {
+  inviteDirty = true;
+  myInvite = $("myInvite").value.trim();
+  renderPreview();
+  saveMyInvite();
+});
+$("btnAddMauInvite").onclick = () => {
+  const t = $("myInvite");
+  if (t.value.trim()) t.value = `${t.value.trimEnd()}\n---\n`;
+  t.focus();
+  t.selectionStart = t.selectionEnd = t.value.length;
+  t.dispatchEvent(new Event("input"));
+};
+$("btnUseAdminInvite").onclick = () => {
+  $("myInvite").value = "";
+  $("myInvite").dispatchEvent(new Event("input"));
+};
+
+// ---------- ảnh gửi kèm tin nhắn của tôi ----------
+const ANH_TOI_DA = 10;
+let imgBusy = 0;          // số thao tác thêm/xoá ảnh đang chạy
+let imgSeq = 0;           // tăng mỗi lần thêm/xoá ảnh xong
+function renderMyImages() {
+  const locked = !!st.running || imgBusy > 0;
+  const soAnhQt = (config.anh || []).length;
+  $("myThumbs").innerHTML = myImages.map((a, i) => `<figure class="thumb">
+    <img src="/api/anh-cua-toi/${encodeURIComponent(a)}" alt="Ảnh gửi kèm ${i + 1}">
+    <button class="btn sm danger" type="button" data-del-img="${esc(a)}" aria-label="Xoá ảnh ${i + 1}" ${locked ? "disabled" : ""}>Xoá</button>
+  </figure>`).join("");
+  $("myImgCount").textContent = myImages.length ? `${myImages.length}/${ANH_TOI_DA} ảnh`
+    : soAnhQt ? `đang dùng ${soAnhQt} ảnh của quản trị` : "chưa có ảnh";
+  $("myImgHint").textContent = myImages.length
+    ? "Mỗi khách nhận tin nhắn kèm các ảnh này. Xoá hết ảnh để dùng lại ảnh của quản trị."
+    : "JPG, PNG hoặc WEBP, tối đa 5 MB mỗi ảnh. Chưa thêm ảnh nào thì gửi kèm ảnh của quản trị (nếu có).";
+  $("btnAddMyImg").disabled = locked || myImages.length >= ANH_TOI_DA;
+  renderPreview();
+}
+$("btnAddMyImg").onclick = () => $("myImgInput").click();
+$("myImgInput").onchange = async () => {
+  const files = [...$("myImgInput").files];
+  $("myImgInput").value = "";
+  if (!files.length) return;
+  const fd = new FormData();
+  files.slice(0, ANH_TOI_DA - myImages.length).forEach((f) => fd.append("anh", f));
+  imgBusy++;
+  renderMyImages();
+  try {
+    const r = await api("/api/anh-cua-toi", fd);
+    myImages = r.anhCuaToi;
+    version = r.version;
+    flash("myMsgSaved", "Đã lưu ảnh");
+  } catch (e) { showError(e); }
+  imgBusy--;
+  imgSeq++;
+  renderMyImages();
+};
+$("myThumbs").addEventListener("click", async (e) => {
+  const ten = e.target.dataset.delImg;
+  if (!ten || imgBusy) return;
+  imgBusy++;
+  renderMyImages();
+  try {
+    const r = await api("/api/anh-cua-toi/xoa", { ten });
+    myImages = r.anhCuaToi;
+    version = r.version;
+  } catch (err) { showError(err); }
+  imgBusy--;
+  imgSeq++;
+  renderMyImages();
+});
+
 // ---------- gửi ----------
 function renderRunControls() {
   const pending = pendingList().length;
@@ -341,6 +437,9 @@ function renderRunControls() {
   if (st.running) $("confirmBox").classList.add("hidden");
   ["btnAddRow", "btnPaste", "btnImport", "btnClearList", "btnInsertTen", "btnAddMau", "btnUseAdmin", "btnDuAnAll", "duAnAll"].forEach((id) => ($(id).disabled = !!st.running));
   $("myMsg").disabled = !!st.running;
+  ["myInvite", "btnAddMauInvite", "btnUseAdminInvite"].forEach((id) => ($(id).disabled = !!st.running));
+  $("btnAddMyImg").disabled = !!st.running || imgBusy > 0 || myImages.length >= ANH_TOI_DA;
+  document.querySelectorAll("#myThumbs [data-del-img]").forEach((b) => (b.disabled = !!st.running || imgBusy > 0));
 }
 $("btnStart").onclick = () => {
   const n = Math.min(pendingList().length, Number(config.gioiHanMoiLan) || Infinity);
@@ -518,6 +617,10 @@ async function poll() {
     config = s.config;
     myDefault = s.tinNhanCuaToi || "";
     $("myMsg").value = myDefault;
+    myInvite = s.loiMoiCuaToi || "";
+    $("myInvite").value = myInvite;
+    myImages = s.anhCuaToi || [];
+    renderMyImages();
     contacts = toLocal(s.contacts);
     setDoneFrom(s.contacts);
     st = s;

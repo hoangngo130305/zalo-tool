@@ -185,7 +185,7 @@ function startRun(a, { batch, cfg, runBy }) {
     .filter((r) => /^0\d{9}$/.test(String(r?.sdt)) && !dangGui.has(String(r.sdt)))
     .slice(0, cfg.gioiHanMoiLan || undefined)      // 0 = không giới hạn
     .map((r) => ({ sdt: String(r.sdt), ten: String(r.ten ?? ""), noiDung: String(r.noiDung ?? "").slice(0, 5000),
-      duAn: String(r.duAn ?? "").slice(0, 100) }));
+      duAn: String(r.duAn ?? "").slice(0, 100), loiMoi: String(r.loiMoi ?? "").slice(0, 3000) }));
   if (!batch.length) throw new Error("Không có số nào để gửi (các số còn lại đang được người khác gửi)");
   // Ảnh gửi kèm tin nhắn (quản trị cài), đọc 1 lần cho cả đợt
   const attachments = cfg.guiTinNhan ? loadAttachments(cfg.anh) : [];

@@ -182,7 +182,8 @@ export async function processOne(api, row, cfg, attachments = []) {
 
   if (cfg.guiKetBan) {
     try {
-      await api.sendFriendRequest(spin(fill(cfg.loiMoiKetBan, row)), user.uid);
+      // Lời mời của nhân viên phụ trách (Django gửi kèm từng người), không có thì của quản trị
+      await api.sendFriendRequest(spin(fill(row.loiMoi || cfg.loiMoiKetBan, row)), user.uid);
       result.ketBan = "Đã gửi";
     } catch (e) {
       // Đã là bạn / đã gửi lời mời trước đó vẫn tính là ok để tiếp tục nhắn

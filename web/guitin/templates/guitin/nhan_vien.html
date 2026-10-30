@@ -132,8 +132,26 @@
             </div>
             <p class="hint" style="margin:0">Gửi cho mọi người <b>không có nội dung riêng</b> ở bảng bên trái. <b>{ten}</b> được thay bằng họ tên từng người. Để trống thì dùng nội dung của quản trị.<br>
               <b>Xáo tin nhắn:</b> bấm <b>+ Thêm mẫu khác</b> để soạn nhiều mẫu (cách nhau bằng dòng <b>---</b>), mỗi khách nhận ngẫu nhiên 1 mẫu. Muốn chỉ đổi vài từ thì viết <b>{Chào|Xin chào|Hello}</b>.</p>
+            <label class="f" for="myInvite" style="margin-top:6px">
+              <span class="row">Lời mời kết bạn của tôi <span class="count" id="myInviteCount"></span></span>
+              <textarea id="myInvite" rows="3" placeholder="Soạn lời mời kết bạn của bạn..."></textarea>
+            </label>
+            <div class="row">
+              <button class="btn sm" type="button" id="btnAddMauInvite">+ Thêm mẫu khác</button>
+              <button class="btn sm link" type="button" id="btnUseAdminInvite">Dùng lời mời của quản trị</button>
+            </div>
+            <p class="hint" style="margin:0">Gửi kèm khi mời kết bạn. Nên ngắn (dưới 150 ký tự mỗi mẫu), dùng được <b>{ten}</b> và nhiều mẫu cách nhau bằng dòng <b>---</b>. Để trống thì dùng lời mời của quản trị.</p>
+            <div>
+              <div class="row"><b style="font-size:13px">Hình ảnh gửi kèm tin nhắn của tôi</b><span class="count" id="myImgCount"></span></div>
+              <div class="thumbs" id="myThumbs"></div>
+              <div class="row" style="margin-top:8px">
+                <button class="btn sm" type="button" id="btnAddMyImg">+ Thêm ảnh</button>
+                <input type="file" id="myImgInput" accept="image/jpeg,image/png,image/webp" multiple class="hidden">
+                <span class="hint" id="myImgHint"></span>
+              </div>
+            </div>
             <div class="preview"><span class="lbl" id="pvMsgLabel">Xem trước</span><span id="pvMsg"></span></div>
-            <div class="preview"><span class="lbl" id="pvLabel">Lời mời kết bạn (do quản trị soạn)</span><span id="pvInvite"></span></div>
+            <div class="preview"><span class="lbl" id="pvLabel">Lời mời kết bạn</span><span id="pvInvite"></span></div>
           </div>
         </section>
       </div>

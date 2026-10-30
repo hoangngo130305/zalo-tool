@@ -116,6 +116,8 @@ def api_state(request):
         **trang_thai_cho(request.user),
         "config": CaiDat.lay().to_dict(),
         "tinNhanCuaToi": request.user.tin_nhan_mac_dinh,
+        "loiMoiCuaToi": request.user.loi_moi_ket_ban,
+        "anhCuaToi": request.user.anh_tin_nhan,
         "contacts": sv.danh_sach(request.user),
         "staff": staff_cho(request.user),
         "logs": [sv.log_dict(n) for n in reversed(logs)],
@@ -151,7 +153,8 @@ def api_contacts(request):
             raise ValueError("Dữ liệu không hợp lệ")
         sv.luu_danh_sach(request.user, rows)
     return {"contacts": sv.danh_sach(request.user), "staff": staff_cho(request.user), "config": CaiDat.lay().to_dict(),
-            "tinNhanCuaToi": request.user.tin_nhan_mac_dinh, "version": sv.phien_ban()}
+            "tinNhanCuaToi": request.user.tin_nhan_mac_dinh, "loiMoiCuaToi": request.user.loi_moi_ket_ban,
+            "anhCuaToi": request.user.anh_tin_nhan, "version": sv.phien_ban()}
 
 
 @api("send", ["POST"])
@@ -164,6 +167,48 @@ def api_tin_nhan_cua_toi(request):
     return {"tinNhanCuaToi": u.tin_nhan_mac_dinh, "version": sv.phien_ban()}
 
 
+@api("send", ["POST"])
+def api_loi_moi_cua_toi(request):
+    """Nhân viên tự sửa lời mời kết bạn của mình (để trống = dùng lời mời của quản trị)."""
+    u = request.user
+    u.loi_moi_ket_ban = str(request.json.get("loiMoi") or "").strip()[:3000]
+    u.save(update_fields=["loi_moi_ket_ban"])
+    sv.tang_phien_ban()
+    return {"loiMoiCuaToi": u.loi_moi_ket_ban, "version": sv.phien_ban()}
+
+
+@api("send", ["POST"])
+def api_anh_cua_toi(request):
+    """Nhân viên tải ảnh gửi kèm tin nhắn của mình (multipart, trường "anh", có thể nhiều file)."""
+    can_khong_dang_gui(request.user)
+    files = request.FILES.getlist("anh")
+    if not files:
+        raise ValueError("Chưa chọn ảnh")
+    for f in files:
+        sv.luu_anh_nv(request.user, f)
+    sv.tang_phien_ban()
+    return {"anhCuaToi": request.user.anh_tin_nhan, "version": sv.phien_ban()}
+
+
+@api("send", ["POST"])
+def api_anh_cua_toi_xoa(request):
+    can_khong_dang_gui(request.user)
+    sv.xoa_anh_nv(request.user, str(request.json.get("ten") or ""))
+    sv.tang_phien_ban()
+    return {"anhCuaToi": request.user.anh_tin_nhan, "version": sv.phien_ban()}
+
+
+@login_required
+def xem_anh_cua_toi(request, ten):
+    from django.http import FileResponse, Http404
+    if ten not in request.user.anh_tin_nhan:
+        raise Http404
+    f = sv.thu_muc_anh_nv(request.user) / ten
+    if not f.is_file():
+        raise Http404
+    return FileResponse(open(f, "rb"))
+
+
 @api("list", ["POST"])
 def api_import(request):
     return {"rows": sv.doc_file(request.body)}
@@ -173,11 +218,11 @@ def api_import(request):
 def api_preview(request):
     cfg = CaiDat.lay()
     items = sv.cho_gui(request.user, request.json.get("phamVi"), cfg.gioi_han_moi_lan)
-    so_anh = cfg.anh.count() if cfg.gui_tin_nhan else 0
+    so_anh = len(sv.anh_gui_kem(request.user, cfg)) if cfg.gui_tin_nhan else 0
     # Có nhiều mẫu thì xem trước một mẫu ngẫu nhiên (lúc gửi thật mỗi người cũng nhận ngẫu nhiên 1 mẫu)
     out = []
     for r in items:
-        loi_moi, tin = sv.dien(cfg.loi_moi_ket_ban, r.ten), sv.noi_dung_gui(r, cfg)
+        loi_moi, tin = sv.dien(sv.loi_moi_gui(r, cfg), r.ten), sv.noi_dung_gui(r, cfg)
         out.append({
             "sdt": r.sdt, "ten": r.ten,
             "loiMoi": sv.xao(loi_moi) if cfg.gui_ket_ban else None, "soMauLoiMoi": len(sv.cac_mau(loi_moi)),
@@ -269,9 +314,10 @@ def api_start(request):
     worker.goi("POST", "/run", {
         "uid": u.id,
         # Gửi kèm nội dung đã điền sẵn cho từng người (nội dung riêng hoặc mặc định)
-        "batch": [{"sdt": r.sdt, "ten": r.ten, "noiDung": sv.noi_dung_gui(r, cfg), "duAn": sv.du_an_cua(r, cfg)}
-                  for r in batch],
-        "cfg": cfg.to_dict(),
+        "batch": [{"sdt": r.sdt, "ten": r.ten, "noiDung": sv.noi_dung_gui(r, cfg), "duAn": sv.du_an_cua(r, cfg),
+                   "loiMoi": sv.loi_moi_gui(r, cfg)} for r in batch],
+        # Ảnh gửi kèm: ảnh riêng của người bấm gửi, chưa có thì ảnh của quản trị
+        "cfg": {**cfg.to_dict(), "anh": sv.anh_gui_kem(u, cfg)},
         "runBy": {"id": u.id, "name": str(u)},
     })
     return {"ok": True}
