@@ -1,7 +1,7 @@
 // Trang của nhân viên: nhập danh sách (SĐT, họ tên, nội dung), gửi tự động, xem lịch sử & xuất Excel.
 const $ = (id) => document.getElementById(id);
 const me = JSON.parse($("me-data").textContent);
-let contacts = [];        // [{ sdt, ten, noiDung }] các số của mình
+let contacts = [];        // [{ id, sdt, ten, noiDung, duAn, khoa, tuChoi }] các số của mình (id trống = dòng mới)
 let doneMap = {};         // sdtChuan -> kết quả mới nhất
 let config = {};
 let myDefault = "";       // tin nhắn mặc định của tôi (để trống = dùng nội dung của quản trị)
@@ -11,26 +11,11 @@ let st = {};              // trạng thái gửi (từ server)
 let version = null;       // phiên bản danh sách trên server
 let lastLogId = 0;
 let listDirty = false;    // có thay đổi chưa lưu -> không tải đè
+let hanMuc = null;        // { daGui, toiDa, tamDungDen } hạn mức hôm nay của Zalo của tôi
 
 // ---------- tiện ích ----------
-// Đầu số di động 11 số cũ -> 10 số mới (giống chuan_hoa_sdt ở server)
-const DAU_SO_CU = {
-  "0120": "070", "0121": "079", "0122": "077", "0126": "076", "0128": "078",
-  "0123": "083", "0124": "084", "0125": "085", "0127": "081", "0129": "082",
-  "0162": "032", "0163": "033", "0164": "034", "0165": "035", "0166": "036", "0167": "037", "0168": "038", "0169": "039",
-  "0186": "056", "0188": "058", "0199": "059",
-};
-function normalizePhone(raw) {
-  let p = String(raw ?? "").replace(/[^\d+]/g, "");
-  if (p.startsWith("+84")) p = "0" + p.slice(3);
-  else if (p.startsWith("84") && (p.length === 11 || p.length === 12)) p = "0" + p.slice(2);
-  else if ((p.length === 9 || p.length === 10) && !p.startsWith("0")) p = "0" + p;
-  if (p.length === 11 && DAU_SO_CU[p.slice(0, 4)]) p = DAU_SO_CU[p.slice(0, 4)] + p.slice(4);
-  return /^0\d{9}$/.test(p) ? p : null;
-}
-// Nhiều mẫu tin nhắn cách nhau bằng dòng "---": mỗi khách nhận ngẫu nhiên 1 mẫu (worker chọn khi gửi)
-const cacMau = (t) => String(t || "").split(/^\s*-{3,}\s*$/m).map((s) => s.trim()).filter(Boolean);
-const fill = (tpl, ten) => String(tpl || "").replace(/\{ten\}/gi, () => ten || "bạn").trim();
+// normalizePhone, cacMau, fill, thanhCong, docDongDan: dùng chung với server (chung.js)
+const { normalizePhone, cacMau, fill, thanhCong, docDongDan } = window.Chung;
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const csrfToken = () => document.cookie.split("; ").find((c) => c.startsWith("csrftoken="))?.split("=")[1] || "";
 const now = () => new Date().toLocaleTimeString("vi-VN");
@@ -55,7 +40,7 @@ async function api(path, body, opts = {}) {
 // Nội dung tin nhắn thực tế sẽ gửi cho 1 người:
 // nội dung riêng của dòng -> tin nhắn của tôi -> nội dung của quản trị
 const baseMsg = () => myDefault || config.noiDungTinNhan || "";
-const msgFor = (c) => fill(c.noiDung || baseMsg(), c.ten);
+const msgFor = (c) => fill(c.noiDung || baseMsg(), c.ten, c.duAn || config.tenDuAn, me.name);
 
 // ---------- trạng thái từng số ----------
 function statusOf(c) {
@@ -65,9 +50,10 @@ function statusOf(c) {
   if (st.current === p) return { cls: "run", text: "Đang gửi" };
   const r = doneMap[p];
   if (r) {
-    if (r.tinNhan === "Lỗi") return { cls: "bad", text: "Lỗi", note: r.ghiChu };
+    if (!thanhCong(r.ketBan, r.tinNhan)) return { cls: "bad", text: "Lỗi", note: r.ghiChu };
     return { cls: "ok", text: "Đã gửi", note: [r.tenZalo && `Zalo: ${r.tenZalo}`, r.thoiGian].filter(Boolean).join(" · ") };
   }
+  if (c.tuChoi) return { cls: "bad", text: "Khách từ chối", note: "Không gửi cho số này nữa" };
   if (config.guiTinNhan && !msgFor(c)) return { cls: "warn", text: "Thiếu nội dung" };
   return { cls: "todo", text: "Chờ gửi" };
 }
@@ -76,7 +62,7 @@ function pendingList() {
   const seen = new Set();
   return contacts.filter((c) => {
     const p = normalizePhone(c.sdt);
-    if (!p || doneMap[p] || seen.has(p)) return false;
+    if (!p || doneMap[p] || c.tuChoi || seen.has(p)) return false;
     if (config.guiTinNhan && !msgFor(c)) return false;
     seen.add(p);
     return true;
@@ -90,14 +76,20 @@ function renderTable() {
   $("tbody").innerHTML = contacts.map((c, i) => {
     const p = normalizePhone(c.sdt);
     const done = !!doneMap[p];
+    // Số quản trị giao: không đổi SĐT, không xoá được (chỉ sửa tên, nội dung, dự án)
+    const khoa = c.khoa ? ' title="Số quản trị giao: không đổi SĐT hay xoá được"' : "";
+    const nutTuChoi = p && !c.tuChoi
+      ? `<button class="btn sm link" data-tuchoi="${p}" title="Khách nói không muốn nhận tin: không bao giờ gửi cho số này nữa" ${locked ? "disabled" : ""}>Từ chối</button>` : "";
+    const nutXoa = c.khoa ? ""
+      : `<button class="btn sm link" data-del="${i}" aria-label="Xoá dòng ${i + 1}" ${locked ? "disabled" : ""}>Xoá</button>`;
     return `<tr data-i="${i}" class="${st.current && st.current === p ? "current" : ""}">
-      <td class="idx">${i + 1}</td>
-      <td><input class="phone" id="sdt-${i}" value="${esc(c.sdt)}" placeholder="0901234567" aria-label="Số điện thoại dòng ${i + 1}" ${locked ? "disabled" : ""}></td>
+      <td class="idx"${khoa}>${i + 1}${c.khoa ? " 🔒" : ""}</td>
+      <td><input class="phone" id="sdt-${i}" value="${esc(c.sdt)}" placeholder="0901234567" aria-label="Số điện thoại dòng ${i + 1}" ${locked || c.khoa ? "disabled" : ""}${khoa}></td>
       <td><input class="name" value="${esc(c.ten)}" placeholder="Họ tên" aria-label="Họ tên dòng ${i + 1}" ${locked ? "disabled" : ""}></td>
       <td><input class="duan" value="${esc(c.duAn)}" placeholder="${esc(config.tenDuAn || "Dự án")}" aria-label="Dự án dòng ${i + 1}" ${locked ? "disabled" : ""}></td>
       <td><textarea class="msg" rows="1" placeholder="${esc(ph)}" aria-label="Nội dung tin nhắn dòng ${i + 1}" ${locked || done ? "disabled" : ""}>${esc(c.noiDung)}</textarea></td>
       <td class="status">${statusCell(statusOf(c))}</td>
-      <td class="act">${done ? `<button class="btn sm link" data-reset="${p}" ${locked ? "disabled" : ""}>Gửi lại</button>` : ""}<button class="btn sm link" data-del="${i}" aria-label="Xoá dòng ${i + 1}" ${locked ? "disabled" : ""}>Xoá</button></td>
+      <td class="act">${done && !c.tuChoi ? `<button class="btn sm link" data-reset="${p}" ${locked ? "disabled" : ""}>Gửi lại</button>` : ""}${nutTuChoi}${nutXoa}</td>
     </tr>`;
   }).join("");
   $("emptyList").classList.toggle("hidden", contacts.length > 0);
@@ -132,14 +124,37 @@ function setDoneFrom(view) {
   doneMap = {};
   for (const c of view) if (c.sdtChuan && c.ketQua) doneMap[c.sdtChuan] = c.ketQua;
 }
-const toLocal = (view) => view.map((c) => ({ sdt: c.sdt, ten: c.ten, noiDung: c.noiDung || "", duAn: c.duAn || "" }));
+const toLocal = (view) => view.map((c) => ({ id: c.id, sdt: c.sdt, ten: c.ten, noiDung: c.noiDung || "", duAn: c.duAn || "",
+  khoa: !!c.khoa, tuChoi: !!c.tuChoi }));
+// Server chỉ lưu phần thay đổi: dòng mới (chưa có id) nhận id sau khi lưu, ghép theo SĐT và thứ tự.
+// Dòng nào gõ tiếp trong lúc đang lưu thì không ghép được: lần lưu sau server tự thay dòng cũ.
+function ganId(view) {
+  const daCo = new Set(contacts.map((c) => c.id).filter(Boolean));
+  const cho = {};
+  for (const v of view) if (!daCo.has(v.id)) (cho[v.sdt] ??= []).push(v);
+  for (const c of contacts) {
+    if (c.id) continue;
+    const v = cho[c.sdt]?.shift();
+    if (v) Object.assign(c, { id: v.id, khoa: !!v.khoa, tuChoi: !!v.tuChoi });
+  }
+}
 const saveContacts = debounce(async () => {
   try {
     const r = await api("/api/contacts", { contacts });
     listDirty = false;
     version = r.version;
     setDoneFrom(r.contacts);
-    refreshStatuses();
+    ganId(r.contacts);
+    const { trungNguoiKhac = [], tuChoi = [], giuLai = 0 } = r.luu || {};
+    if (trungNguoiKhac.length || tuChoi.length) {
+      // Số bị server từ chối thêm: bỏ khỏi bảng để không lưu lại mãi
+      const bo = new Set([...trungNguoiKhac, ...tuChoi]);
+      contacts = contacts.filter((c) => c.id || !bo.has(normalizePhone(c.sdt)));
+      renderTable();
+      if (trungNguoiKhac.length) showError(new Error(`Không thêm ${trungNguoiKhac.length} số đã có trong danh sách của nhân viên khác: ${trungNguoiKhac.slice(0, 5).join(", ")}${trungNguoiKhac.length > 5 ? "…" : ""}`));
+      if (tuChoi.length) showError(new Error(`Không thêm ${tuChoi.length} số khách đã từ chối liên hệ: ${tuChoi.slice(0, 5).join(", ")}${tuChoi.length > 5 ? "…" : ""}`));
+    } else refreshStatuses();
+    if (giuLai) { info(`Giữ lại ${giuLai} số quản trị giao (nhân viên không xoá được).`, "warn"); reloadContacts(); }
     flash("listSaved", "Đã lưu");
   } catch (e) { showError(e); }
 }, 600);
@@ -178,11 +193,23 @@ $("tbody").addEventListener("input", (e) => {
   queueSave();
 });
 $("tbody").addEventListener("click", async (e) => {
-  const { del, reset } = e.target.dataset;
+  const { del, reset, tuchoi } = e.target.dataset;
   if (del !== undefined) {
+    if (contacts[Number(del)]?.khoa) return;
     contacts.splice(Number(del), 1);
     renderTable();
     queueSave();
+  } else if (tuchoi) {
+    const lyDo = prompt(`Đánh dấu ${tuchoi} là khách từ chối liên hệ: tool sẽ không bao giờ gửi cho số này nữa (nhập lại cũng bị loại).\n\nLý do (không bắt buộc):`, "Khách không muốn nhận tin");
+    if (lyDo === null) return;
+    try {
+      const r = await api("/api/tu-choi", { sdt: tuchoi, lyDo });
+      version = r.version;
+      const tc = new Set(r.contacts.filter((c) => c.tuChoi).map((c) => c.sdtChuan));
+      for (const c of contacts) c.tuChoi = tc.has(normalizePhone(c.sdt));
+      renderTable();
+      info(`Đã đánh dấu ${tuchoi} là khách từ chối liên hệ.`, "warn");
+    } catch (err) { showError(err); }
   } else if (reset) {
     try {
       const r = await api("/api/reset", { sdt: reset });
@@ -207,9 +234,11 @@ $("btnClearList").onclick = () => {
   }
   clearArmed = false;
   $("btnClearList").textContent = "Xoá hết";
-  contacts = [];
+  const giu = contacts.filter((c) => c.khoa);     // số quản trị giao: không xoá được
+  contacts = giu;
   renderTable();
   queueSave();
+  if (giu.length) info(`Đã xoá các số bạn tự thêm. Giữ lại ${giu.length} số quản trị giao.`, "warn");
 };
 function addMany(rows) {
   const have = new Set(contacts.map((c) => normalizePhone(c.sdt) || c.sdt));
@@ -241,22 +270,10 @@ $("btnDuAnAll").onclick = () => {
   info(n ? `Đã gán dự án “${duAn}” cho ${n} số.` : "Không còn số nào chưa có dự án.", n ? "ok" : "info");
 };
 
-// Dán: mỗi dòng "SĐT, Họ tên, Nội dung" hoặc 2–3 cột copy từ Excel (Tab)
+// Dán: mỗi dòng "SĐT, Họ tên, Nội dung" hoặc 2–4 cột copy từ Excel (Tab: SĐT, Họ tên, Nội dung, Dự án)
 $("btnPaste").onclick = () => { $("pasteText").value = ""; openModal("pasteModal"); $("pasteText").focus(); };
 $("btnPasteOk").onclick = () => {
-  const rows = $("pasteText").value.split(/\r?\n/).map((line) => {
-    if (!line.trim()) return null;
-    let parts;
-    if (line.includes("\t")) {
-      const [a, b = "", ...rest] = line.split("\t");
-      parts = [a, b, rest.join("\t")];
-    } else {
-      const m = line.trim().match(/^([^,;|]+)(?:\s*[,;|]\s*([^,;|]*))?(?:\s*[,;|]\s*([\s\S]*))?$/);
-      parts = m ? [m[1], m[2] || "", m[3] || ""] : [line];
-    }
-    const sdt = parts[0].replace(/[\s.\-]/g, "");
-    return /^\+?\d{8,12}$/.test(sdt) ? { sdt, ten: parts[1].trim(), noiDung: parts[2].trim() } : null;
-  }).filter(Boolean);
+  const rows = $("pasteText").value.split(/\r?\n/).map(docDongDan).filter(Boolean);
   closeModal("pasteModal");
   if (!rows.length) return showError(new Error("Không đọc được dòng nào. Mỗi dòng cần bắt đầu bằng số điện thoại."));
   addMany(rows);
@@ -421,19 +438,25 @@ $("myThumbs").addEventListener("click", async (e) => {
 function renderRunControls() {
   const pending = pendingList().length;
   const loggedIn = st.login === "in";
-  const n = Math.min(pending, Number(config.gioiHanMoiLan) || Infinity);   // 0 = không giới hạn
+  const n = soLanNay();
+  const conLai = conLaiHomNay();
   const mine = true;   // mỗi người gửi bằng Zalo của chính mình
   const thieu = contacts.filter((c) => statusOf(c).text === "Thiếu nội dung").length;
   $("btnStart").classList.toggle("hidden", !!st.running);
   $("btnStop").classList.toggle("hidden", !st.running || !mine);
   $("btnStop").disabled = !!st.stopRequested;
   $("btnStop").textContent = st.stopRequested ? "Đang dừng..." : "Dừng";
-  $("btnStart").disabled = !loggedIn || !pending || st.worker === false;
-  $("btnPreview").disabled = !pending;
-  $("runHint").textContent = st.running ? ""
+  const chan = hanMuc?.tamDungDen || conLai === 0;
+  $("btnStart").disabled = !loggedIn || !pending || st.worker === false || chan;
+  $("btnPreview").disabled = !pending || chan;
+  const gio = (p) => `${Math.floor(p / 60)}:${String(p % 60).padStart(2, "0")}`;
+  const homNay = hanMuc?.toiDa ? ` Hôm nay Zalo của bạn đã gửi ${hanMuc.daGui}/${hanMuc.toiDa} người.` : "";
+  $("runHint").textContent = st.running ? homNay.trim()
+    : hanMuc?.tamDungDen ? `Zalo của bạn đang tạm dừng gửi đến ${hanMuc.tamDungDen} vì đợt trước gặp nhiều lỗi liên tiếp (có thể Zalo đang hạn chế tài khoản). Kiểm tra Zalo trên điện thoại; quản trị có thể bỏ tạm dừng.`
+    : conLai === 0 ? `Zalo của bạn đã gửi đủ ${hanMuc.toiDa} người hôm nay (hạn mức để tránh bị Zalo khoá). Mai gửi tiếp nhé.`
     : !loggedIn ? "Kết nối Zalo của bạn ở khung “Zalo của tôi” phía trên trước khi gửi."
     : !pending ? (thieu ? `Còn ${thieu} người thiếu nội dung tin nhắn, điền nội dung để gửi.` : "Không còn số nào chờ gửi.")
-    : `Lần này sẽ gửi cho ${n} người${pending > n ? ` (còn ${pending - n} người cho lần sau)` : ""}. Mỗi người cách nhau ${config.choToiThieuGiay}–${config.choToiDaGiay} giây.${config.nghiSauSoLan ? ` Cứ ${config.nghiSauSoLan} người nghỉ ${config.nghiPhut} phút.` : ""}${thieu ? ` ${thieu} người thiếu nội dung sẽ được bỏ qua.` : ""}`;
+    : `Lần này sẽ gửi cho ${n} người${pending > n ? ` (còn ${pending - n} người cho lần sau)` : ""}.${homNay} Mỗi người cách nhau ${config.choToiThieuGiay}–${config.choToiDaGiay} giây.${config.nghiSauSoLan ? ` Cứ ${config.nghiSauSoLan} người nghỉ ${config.nghiPhut} phút.` : ""} Chỉ gửi trong khung ${gio(config.gioBatDau ?? 480)}–${gio(config.gioKetThuc ?? 1200)}${config.nghiChuNhat ? ", nghỉ Chủ nhật" : ""}.${thieu ? ` ${thieu} người thiếu nội dung sẽ được bỏ qua.` : ""}`;
   if (st.running) $("confirmBox").classList.add("hidden");
   ["btnAddRow", "btnPaste", "btnImport", "btnClearList", "btnInsertTen", "btnAddMau", "btnUseAdmin", "btnDuAnAll", "duAnAll"].forEach((id) => ($(id).disabled = !!st.running));
   $("myMsg").disabled = !!st.running;
@@ -441,8 +464,12 @@ function renderRunControls() {
   $("btnAddMyImg").disabled = !!st.running || imgBusy > 0 || myImages.length >= ANH_TOI_DA;
   document.querySelectorAll("#myThumbs [data-del-img]").forEach((b) => (b.disabled = !!st.running || imgBusy > 0));
 }
+// Hôm nay còn gửi được bao nhiêu người (null = không giới hạn)
+const conLaiHomNay = () => (hanMuc?.toiDa ? Math.max(0, hanMuc.toiDa - hanMuc.daGui) : null);
+// Lần bấm gửi này gửi bao nhiêu người: không quá "mỗi lần" (0 = không giới hạn) và phần còn lại hôm nay
+const soLanNay = () => Math.min(pendingList().length, Number(config.gioiHanMoiLan) || Infinity, conLaiHomNay() ?? Infinity);
 $("btnStart").onclick = () => {
-  const n = Math.min(pendingList().length, Number(config.gioiHanMoiLan) || Infinity);
+  const n = soLanNay();
   const what = [config.guiKetBan && "lời mời kết bạn", config.guiTinNhan && "tin nhắn"].filter(Boolean).join(" rồi ");
   $("confirmText").innerHTML = `Tự động gửi ${esc(what)} cho <b>${n} người</b> trong danh sách của bạn?`;
   $("confirmBox").classList.remove("hidden");
@@ -602,6 +629,7 @@ async function poll() {
     const r = await api(`/api/poll?log=${lastLogId}`);
     $("connAlert").classList.add("hidden");
     st = r;
+    if (r.hanMuc) hanMuc = r.hanMuc;
     renderState();
     r.logs.forEach(addLog);
     if (version !== null && r.version !== version) reloadContacts();
@@ -624,6 +652,7 @@ async function poll() {
     contacts = toLocal(s.contacts);
     setDoneFrom(s.contacts);
     st = s;
+    hanMuc = s.hanMuc || null;
     version = s.version;
     s.logs.forEach(addLog);
     renderTable();

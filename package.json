@@ -4,7 +4,7 @@
   "description": "",
   "scripts": {
     "worker": "node src/worker.js",
-    "mau": "node src/tao-file-mau.js"
+    "test": "node --test tests/*.test.js"
   },
   "keywords": [],
   "author": "",

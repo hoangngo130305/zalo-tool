@@ -1,4 +1,5 @@
 import re
+from datetime import time
 
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.core.exceptions import ValidationError
@@ -76,6 +77,18 @@ def _tach_so_dinh_lien(d):
     return out if len(out) > 1 else []
 
 
+# ---------- trạng thái gửi: một định nghĩa duy nhất, dùng ở models, services, admin và JS (chung.js) ----------
+def thanh_cong(ket_ban, tin_nhan):
+    """Gửi thành công = tin nhắn đã gửi, hoặc tắt gửi tin (“-”) mà lời mời kết bạn đã gửi."""
+    return tin_nhan == "Đã gửi" or (tin_nhan == "-" and ket_ban == "Đã gửi")
+
+
+def q_thanh_cong(tien_to=""):
+    """Bộ lọc Q giống hệt thanh_cong(). tien_to: vd "kq_" khi lọc trên cột annotate."""
+    from django.db.models import Q
+    return Q(**{f"{tien_to}tin_nhan": "Đã gửi"}) | Q(**{f"{tien_to}tin_nhan": "-", f"{tien_to}ket_ban": "Đã gửi"})
+
+
 def nhom_chi_xem():
     """Nhóm quyền cho vai trò Chỉ xem: chỉ có quyền xem các bảng của tool trong /admin/."""
     from django.contrib.auth.models import Group, Permission
@@ -135,6 +148,12 @@ class NguoiDung(AbstractUser):
     anh_tin_nhan = models.JSONField(
         "Ảnh gửi kèm tin nhắn của nhân viên", default=list, blank=True,
         help_text="Nhân viên tự chọn trên trang gửi tin (data/anh-tin-nhan/nv-<id>/). Để trống thì dùng ảnh trong Cài đặt gửi tin.")
+    gioi_han_ngay = models.PositiveSmallIntegerField(
+        "Tối đa người/ngày của Zalo này", default=0, validators=[MaxValueValidator(500)],
+        help_text="0 = theo “Tối đa người mỗi ngày” trong Cài đặt gửi tin. Zalo mới tạo nên đặt thấp (vd 10/ngày tuần đầu) rồi tăng dần.")
+    tam_dung_den = models.DateTimeField(
+        "Tạm dừng gửi đến", null=True, blank=True,
+        help_text="Tool tự đặt khi gặp nhiều lỗi liên tiếp (có thể Zalo đang hạn chế tài khoản). Xoá ô này để cho gửi lại ngay.")
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["ho_ten"]
@@ -176,13 +195,16 @@ class NguoiNhan(models.Model):
     sdt = models.CharField("SĐT chuẩn hoá", max_length=10, null=True, blank=True, db_index=True, editable=False)
     ten = models.CharField("Tên", max_length=255, blank=True)
     noi_dung = models.TextField("Nội dung tin nhắn riêng", blank=True,
-                                help_text="Để trống thì dùng nội dung mặc định trong Cài đặt gửi tin. Có thể dùng {ten}. " + HD_XAO)
+                                help_text="Để trống thì dùng nội dung mặc định trong Cài đặt gửi tin. Có thể dùng {ten}, {duan}, {nhanvien}. " + HD_XAO)
     du_an = models.CharField("Dự án", max_length=100, blank=True, db_index=True,
                              help_text="Ghi vào tên gợi nhớ ({duan}). Để trống thì dùng tên dự án mặc định trong Cài đặt gửi tin.")
     phu_trach = models.ForeignKey(
         NguoiDung, verbose_name="Nhân viên phụ trách", null=True, blank=True, on_delete=models.SET_NULL,
         related_name="nguoi_nhan", limit_choices_to={"vai_tro__in": [NguoiDung.QUAN_TRI, NguoiDung.NHAN_VIEN]},
     )
+    quan_tri_giao = models.BooleanField(
+        "Quản trị giao", default=False,
+        help_text="Số do quản trị nhập / giao: nhân viên không xoá hay đổi SĐT được, chỉ sửa tên, nội dung, dự án.")
     tao_luc = models.DateTimeField("Thêm lúc", auto_now_add=True)
 
     class Meta:
@@ -218,8 +240,8 @@ class KetQua(models.Model):
         ordering = ["-thoi_gian"]
 
     @property
-    def loi(self):
-        return self.tin_nhan == "Lỗi" or self.ket_ban == "Lỗi"
+    def thanh_cong(self):
+        return thanh_cong(self.ket_ban, self.tin_nhan)
 
     def __str__(self):
         return f"{self.sdt}: kết bạn {self.ket_ban}, tin nhắn {self.tin_nhan}"
@@ -227,6 +249,8 @@ class KetQua(models.Model):
 
 # ---------- lịch sử gửi: mỗi lần gửi một dòng, kể cả gửi lại ----------
 class LichSuGui(models.Model):
+    # Mã do worker đặt cho từng kết quả: worker gửi lại kết quả chưa được xác nhận nên cần chống ghi 2 lần
+    ma = models.CharField("Mã kết quả", max_length=40, unique=True, null=True, blank=True, editable=False)
     sdt = models.CharField("SĐT", max_length=10, db_index=True)
     ten = models.CharField("Tên", max_length=255, blank=True)
     ten_zalo = models.CharField("Tên Zalo", max_length=255, blank=True)
@@ -246,7 +270,7 @@ class LichSuGui(models.Model):
 
     @property
     def thanh_cong(self):
-        return self.tin_nhan == "Đã gửi" or (self.tin_nhan == "-" and self.ket_ban == "Đã gửi")
+        return thanh_cong(self.ket_ban, self.tin_nhan)
 
     def __str__(self):
         return f"{self.sdt} lúc {self.thoi_gian:%d/%m/%Y %H:%M}"
@@ -255,16 +279,31 @@ class LichSuGui(models.Model):
 # ---------- cài đặt (chỉ 1 dòng) ----------
 class CaiDat(models.Model):
     loi_moi_ket_ban = models.TextField("Lời mời kết bạn", default="Chào {ten}, mình xin phép kết bạn để tiện trao đổi ạ.",
-                                       help_text="{ten} sẽ được thay bằng tên từng người. Nên dưới 150 ký tự (mỗi mẫu). "
+                                       help_text="{ten} = tên từng người, {duan} = dự án, {nhanvien} = nhân viên phụ trách. Nên dưới 150 ký tự (mỗi mẫu). "
                                                  + HD_XAO)
     noi_dung_tin_nhan = models.TextField("Tin nhắn", default="Chào {ten}!",
-                                         help_text="{ten} sẽ được thay bằng tên từng người. " + HD_XAO)
+                                         help_text="{ten} = tên từng người, {duan} = dự án, {nhanvien} = nhân viên phụ trách. " + HD_XAO)
     gui_ket_ban = models.BooleanField("Gửi lời mời kết bạn", default=True)
     gui_tin_nhan = models.BooleanField("Gửi tin nhắn", default=True)
     gioi_han_moi_lan = models.PositiveIntegerField(
         "Số người tối đa mỗi lần", default=0,
         help_text="0 = không giới hạn: bấm gửi một lần là tool gửi hết danh sách chờ. "
                   "Nên bật “Nghỉ giữa các lượt” để tool tự nghỉ sau mỗi X người.")
+    gioi_han_moi_ngay = models.PositiveSmallIntegerField(
+        "Tối đa người mỗi ngày (mỗi Zalo)", default=30, validators=[MaxValueValidator(500)],
+        help_text="Mỗi tài khoản Zalo gửi tối đa bấy nhiêu người mỗi ngày, đủ thì tool tự dừng, mai gửi tiếp. "
+                  "Nên 20–30. Đặt riêng cho từng nhân viên trong Tài khoản. 0 = không giới hạn (dễ bị Zalo khoá).")
+    dung_khi_loi_lien_tiep = models.PositiveSmallIntegerField(
+        "Tự dừng sau số lỗi liên tiếp", default=5, validators=[MaxValueValidator(50)],
+        help_text="Gặp bấy nhiêu lỗi liên tiếp (thường do Zalo đang hạn chế tìm số / kết bạn) thì tự dừng đợt gửi "
+                  "và tạm dừng Zalo đó. 0 = không tự dừng.")
+    tam_dung_gio = models.PositiveSmallIntegerField(
+        "Tạm dừng sau khi tự dừng (giờ)", default=24, validators=[MaxValueValidator(168)],
+        help_text="Sau khi tự dừng vì lỗi, Zalo đó không được gửi tiếp trong bấy nhiêu giờ (quản trị bỏ được trong Tài khoản). 0 = không tạm dừng.")
+    gio_bat_dau = models.TimeField("Gửi từ", default=time(8, 0),
+                                   help_text="Ngoài khung giờ này tool tự tạm nghỉ, đến giờ thì gửi tiếp.")
+    gio_ket_thuc = models.TimeField("Gửi đến", default=time(20, 0))
+    nghi_chu_nhat = models.BooleanField("Không gửi Chủ nhật", default=False)
     cho_toi_thieu_giay = models.PositiveIntegerField("Chờ tối thiểu (giây)", default=60, validators=[MinValueValidator(30)],
                                                       help_text="Không cho dưới 30 giây để tránh bị Zalo khoá tài khoản.")
     cho_toi_da_giay = models.PositiveIntegerField("Chờ tối đa (giây)", default=150, validators=[MinValueValidator(30)])
@@ -287,6 +326,8 @@ class CaiDat(models.Model):
     def clean(self):
         if self.cho_toi_da_giay < self.cho_toi_thieu_giay:
             raise ValidationError({"cho_toi_da_giay": "Phải lớn hơn hoặc bằng thời gian chờ tối thiểu."})
+        if self.gio_bat_dau and self.gio_ket_thuc and self.gio_ket_thuc <= self.gio_bat_dau:
+            raise ValidationError({"gio_ket_thuc": "Giờ kết thúc phải sau giờ bắt đầu."})
 
     def save(self, *args, **kwargs):
         # Luôn chỉ có 1 dòng, và luôn giữ giới hạn an toàn
@@ -309,6 +350,11 @@ class CaiDat(models.Model):
             "gioiHanMoiLan": self.gioi_han_moi_lan,
             "choToiThieuGiay": self.cho_toi_thieu_giay, "choToiDaGiay": self.cho_toi_da_giay,
             "nghiSauSoLan": self.nghi_sau_so_lan, "nghiPhut": self.nghi_phut,
+            "gioiHanMoiNgay": self.gioi_han_moi_ngay, "dungKhiLoiLienTiep": self.dung_khi_loi_lien_tiep,
+            # Khung giờ gửi theo giờ Việt Nam, dạng phút trong ngày (worker tự nghỉ ngoài khung giờ)
+            "gioBatDau": self.gio_bat_dau.hour * 60 + self.gio_bat_dau.minute,
+            "gioKetThuc": self.gio_ket_thuc.hour * 60 + self.gio_ket_thuc.minute,
+            "nghiChuNhat": self.nghi_chu_nhat,
             "doiTenGoiNho": self.doi_ten_goi_nho, "mauTenGoiNho": self.mau_ten_goi_nho, "tenDuAn": self.ten_du_an,
             # Ảnh gửi kèm tin nhắn cho từng khách (đường dẫn trong data/, worker tự đọc)
             "anh": [f"{THU_MUC_ANH_TIN_NHAN}/{a.tep.name}" for a in self.anh.all()],
@@ -398,6 +444,29 @@ class LichSuGuiNhom(models.Model):
 
     def __str__(self):
         return f"{self.ten_nhom or self.nhom_id} lúc {self.thoi_gian:%d/%m/%Y %H:%M}"
+
+
+# ---------- khách từ chối liên hệ (danh sách đen) ----------
+class KhongLienHe(models.Model):
+    sdt = models.CharField("SĐT", max_length=10, primary_key=True)
+    ly_do = models.CharField("Lý do", max_length=255, blank=True)
+    nguoi_them = models.ForeignKey(NguoiDung, verbose_name="Người thêm", null=True, blank=True, on_delete=models.SET_NULL)
+    thoi_gian = models.DateTimeField("Thêm lúc", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "khách từ chối liên hệ"
+        verbose_name_plural = "Khách từ chối liên hệ"
+        ordering = ["-thoi_gian"]
+
+    def save(self, *args, **kwargs):
+        sdt = chuan_hoa_sdt(self.sdt)
+        if not sdt:
+            raise ValidationError({"sdt": "Số điện thoại không hợp lệ."})
+        self.sdt = sdt
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.sdt
 
 
 # ---------- nhật ký ----------

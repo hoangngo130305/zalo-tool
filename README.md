@@ -77,6 +77,33 @@ Trang **/gui-nhom/** (nhân viên: tab **Gửi vào nhóm Zalo**; quản trị: 
 - **Số người tối đa mỗi lần**: để `0` là không giới hạn, bấm gửi một lần là gửi hết danh sách chờ. Nên bật
   **Nghỉ giữa các lượt** để tool tự nghỉ sau mỗi X người.
 
+### An toàn tài khoản Zalo (/admin/ → Cài đặt gửi tin → Giới hạn an toàn, Khung giờ gửi)
+- **Tối đa người mỗi ngày (mỗi Zalo)**: mặc định 30. Đếm theo lịch sử gửi trong ngày (kể cả lần lỗi), đủ thì tool
+  tự dừng, mai gửi tiếp. Đặt riêng cho từng nhân viên trong Tài khoản → *Tối đa người/ngày của Zalo này*
+  (Zalo mới nên để thấp, vd 10/ngày tuần đầu). `0` = không giới hạn.
+- **Tự dừng sau số lỗi liên tiếp** (mặc định 5): Zalo báo lỗi liền nhiều lần (thường do bị hạn chế tìm số / kết bạn)
+  thì tool tự dừng và **tạm dừng Zalo đó** trong *Tạm dừng sau khi tự dừng* giờ (mặc định 24). Số chưa đăng ký Zalo
+  không tính là lỗi. Bỏ tạm dừng sớm: Tài khoản → xoá ô *Tạm dừng gửi đến*.
+- **Khung giờ gửi** (mặc định 8:00–20:00, giờ Việt Nam) và **Không gửi Chủ nhật**: ngoài giờ tool tự nghỉ, đến giờ
+  gửi tiếp (đợt gửi không bị huỷ).
+- **Khách từ chối liên hệ**: nhân viên bấm *Từ chối* ở dòng của khách, hoặc quản trị thêm ở /admin/ → Khách từ chối
+  liên hệ. Số này không bao giờ được gửi nữa, nhập lại cũng bị loại.
+- **Số quản trị giao** (có 🔒 ở trang nhân viên): nhân viên không xoá hay đổi SĐT được, chỉ sửa tên, nội dung, dự án.
+- Nội dung, lời mời dùng được `{ten}`, `{duan}` (dự án), `{nhanvien}` (nhân viên phụ trách).
+- Kết quả gửi được ghi vào `data/cho-bao-cao.jsonl` trước khi báo về web; web hoặc MySQL tắt thì worker tự gửi lại
+  khi web chạy lại, nên không mất kết quả và khách không bị nhắn 2 lần.
+- Báo sự cố qua Telegram (không bắt buộc): thêm vào `config.json`
+  `"thongBao": {"telegram": {"token": "<token bot>", "chatId": "<id nhóm/người nhận>"}}` rồi khởi động lại worker.
+  Tool nhắn khi Zalo tự dừng vì lỗi hoặc phiên Zalo hết hạn.
+
+### Kiểm tra trước khi cập nhật
+```
+cd web && ..\.venv\Scripts\python manage.py test guitin
+npm test
+```
+Bộ ví dụ chung `tests/vi-du-chung.json` đảm bảo bản Python, Node và trang web (`chung.js`) chuẩn hoá SĐT,
+tách mẫu, điền `{ten}`… cho cùng kết quả. Sửa một bản thì thêm ví dụ vào file này.
+
 ### Ảnh kèm tin nhắn khách, xáo nội dung
 - **Ảnh kèm tin nhắn khách**: /admin/ → Cài đặt gửi tin → mục **Hình ảnh gửi kèm tin nhắn** (tối đa 10 ảnh JPG/PNG/WEBP,
   mỗi ảnh ≤ 5 MB). Mỗi khách nhận tin nhắn kèm các ảnh này. Để trống thì chỉ gửi chữ.
@@ -85,7 +112,7 @@ Trang **/gui-nhom/** (nhân viên: tab **Gửi vào nhóm Zalo**; quản trị: 
   viết `{Chào|Xin chào|Hello}`. Lịch sử gửi lưu đúng mẫu khách đã nhận.
 
 ### Tài khoản
-- Sai mật khẩu 5 lần sẽ bị khoá đăng nhập 5 phút.
+- Sai mật khẩu 5 lần sẽ bị khoá đăng nhập 5 phút (khoá theo email + máy, người khác cùng máy vẫn đăng nhập được).
 - Khoá tài khoản: /admin/ → Tài khoản → bỏ chọn “Hoạt động”. Xoá tài khoản thì các số người đó
   phụ trách chuyển về “chưa giao”.
 - Ai cũng tự đổi được mật khẩu (nhân viên: nút “Đổi mật khẩu” góc trên; quản trị: menu tài khoản trong /admin/).

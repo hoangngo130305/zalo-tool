@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import {
-  ROOT, sanitizeConfig, newZalo, hasZaloSession, clearZaloSession, savedSessionIds,
+  ROOT, sanitizeConfig, newZalo, hasZaloSession, clearZaloSession, savedSessionIds, secureSessionDir,
   loginWithSession, loginWithQR, runBatch, sleep, processOne, processGroup, listGroups, loadAttachments,
 } from "./core.js";
 
@@ -70,10 +70,70 @@ async function report(type, data, tries = 5) {
   }
   return false;
 }
-// Nhật ký gắn với chủ tài khoản Zalo để mỗi nhân viên chỉ thấy nhật ký của mình
-function log(a, text, level = "info") {
+
+// Hàng đợi kết quả trên đĩa: kết quả gửi được ghi vào data/cho-bao-cao.jsonl TRƯỚC khi báo về Django,
+// chỉ xoá khi Django xác nhận đã lưu. Django tắt / MySQL lỗi lâu thì worker cứ 30 giây gửi lại, khởi động lại
+// cũng gửi tiếp, nên không mất kết quả và khách không bị nhắn 2 lần. Mỗi mục có mã riêng để Django không ghi trùng.
+const QUEUE_FILE = path.join(ROOT, "data", "cho-bao-cao.jsonl");
+let queue = [];
+try {
+  queue = fs.readFileSync(QUEUE_FILE, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+} catch (e) {
+  if (e.code !== "ENOENT") console.error(`Không đọc được ${QUEUE_FILE}: ${e.message}`);
+}
+const saveQueue = () => {
+  const tmp = `${QUEUE_FILE}.tmp`;
+  fs.writeFileSync(tmp, queue.map((q) => JSON.stringify(q)).join("\n") + (queue.length ? "\n" : ""));
+  fs.renameSync(tmp, QUEUE_FILE);
+};
+// SĐT có kết quả chưa báo được về Django: không gửi lại số này dù Django tưởng là chưa gửi
+const unreported = () => new Set(queue.filter((q) => q.type === "result").map((q) => q.data.sdt));
+let flushing = null;
+function flushQueue(tries = 1) {
+  flushing ??= (async () => {
+    try {
+      for (const item of [...queue]) {
+        if (!(await report(item.type, { ...item.data, ma: item.ma }, tries))) break;   // Django chưa nhận: để lần sau
+        queue = queue.filter((q) => q !== item);
+        saveQueue();
+      }
+    } finally {
+      flushing = null;
+    }
+  })();
+  return flushing;
+}
+async function reportDurable(type, data) {
+  const item = { ma: crypto.randomUUID(), type, data };
+  queue.push(item);
+  fs.mkdirSync(path.dirname(QUEUE_FILE), { recursive: true });
+  fs.appendFileSync(QUEUE_FILE, JSON.stringify(item) + "\n");
+  if (flushing) await flushing;      // lượt gửi lại đang chạy không có mục mới này
+  await flushQueue(5);
+  return !queue.includes(item);
+}
+setInterval(() => { if (queue.length) flushQueue(); }, 30_000).unref();
+
+// Báo sự cố cho quản trị qua Telegram (không bắt buộc): config.json -> thongBao.telegram { token, chatId }
+const TELEGRAM = conf.thongBao?.telegram;
+async function notify(text) {
+  if (!TELEGRAM?.token || !TELEGRAM?.chatId) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${TELEGRAM.token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: TELEGRAM.chatId, text: `Zalo Tool: ${text}` }),
+    });
+  } catch (e) {
+    console.error(`Không gửi được thông báo Telegram: ${e.message}`);
+  }
+}
+
+// Nhật ký gắn với chủ tài khoản Zalo để mỗi nhân viên chỉ thấy nhật ký của mình.
+// luu = false: chỉ in ra màn hình (vd "Chờ 60 giây...", trang web đã tự hiện đồng hồ đếm ngược)
+function log(a, text, level = "info", luu = true) {
   console.log(`[${new Date().toLocaleTimeString("vi-VN")}] #${a.uid} ${text}`);
-  report("log", { text, level, nguoiDungId: a.uid }, 2);
+  if (luu) report("log", { text, level, nguoiDungId: a.uid }, 2);
 }
 
 // ---------- đăng nhập Zalo ----------
@@ -95,7 +155,10 @@ async function startLogin(a, { useSession = true } = {}) {
   if (useSession) {
     const api = await loginWithSession(newZalo(), a.uid);
     if (api) return finishLogin(a, api);
-    if (hasZaloSession(a.uid)) log(a, "Phiên Zalo cũ đã hết hạn, cần quét QR lại.", "warn");
+    if (hasZaloSession(a.uid)) {
+      log(a, "Phiên Zalo cũ đã hết hạn, cần quét QR lại.", "warn");
+      notify(`phiên Zalo của tài khoản #${a.uid} đã hết hạn, cần quét QR lại.`);
+    }
   }
 
   log(a, "Đang tạo mã QR, mở app Zalo trên điện thoại để quét.");
@@ -135,7 +198,11 @@ function launch(a, { kind, items, cfg, runBy, task, label, keyOf, onResult }) {
     progress: { i: 0, total: items.length }, pending: kind === "ca-nhan" ? items.map((r) => r.sdt) : [],
   });
   const nghi = cfg.nghiSauSoLan ? ` Cứ ${cfg.nghiSauSoLan} lần gửi nghỉ ${cfg.nghiPhut} phút.` : "";
-  log(a, `${runBy?.name || "Ai đó"} bắt đầu gửi cho ${items.length} ${label} bằng Zalo ${a.account}.${nghi}`, "ok");
+  const gio = (p) => `${Math.floor(p / 60)}:${String(p % 60).padStart(2, "0")}`;
+  const khung = ` Chỉ gửi ${gio(cfg.gioBatDau)}–${gio(cfg.gioKetThuc)}${cfg.nghiChuNhat ? ", nghỉ Chủ nhật" : ""}.`;
+  log(a, `${runBy?.name || "Ai đó"} bắt đầu gửi cho ${items.length} ${label} bằng Zalo ${a.account}.${nghi}${khung}`, "ok");
+  let loiLienTiep = 0;
+  let baoNgoaiGio = null;     // chỉ ghi nhật ký 1 lần cho mỗi lần nghỉ ngoài giờ
 
   // Chờ theo từng nhịp ngắn để nút Dừng có hiệu lực ngay
   const wait = async (ms) => {
@@ -154,12 +221,27 @@ function launch(a, { kind, items, cfg, runBy, task, label, keyOf, onResult }) {
     onResult: async (row, res, i, n) => {
       Object.assign(a, { current: null, progress: { i: i + 1, total: n } });
       if (kind === "ca-nhan") a.pending = a.pending.filter((s) => s !== row.sdt);
-      await onResult(row, res);
+      const { loiZalo, ...ketQua } = res;
+      await onResult(row, ketQua);
+      // Zalo báo lỗi nhiều lần liền (thường do bị hạn chế): tự dừng để tài khoản không bị phạt nặng hơn
+      loiLienTiep = loiZalo ? loiLienTiep + 1 : 0;
+      if (cfg.dungKhiLoiLienTiep && loiLienTiep >= cfg.dungKhiLoiLienTiep && !a.stopRequested && i + 1 < n) {
+        a.stopRequested = true;
+        log(a, `Zalo báo lỗi ${loiLienTiep} lần liên tiếp, có thể tài khoản ${a.account} đang bị Zalo hạn chế. `
+          + "Đã tự dừng đợt gửi. Mở Zalo trên điện thoại kiểm tra trước khi gửi tiếp.", "error");
+        report("auto_stop", { nguoiDungId: a.uid, soLoi: loiLienTiep });
+        notify(`Zalo ${a.account} (tài khoản #${a.uid}) báo lỗi ${loiLienTiep} lần liên tiếp, đã tự dừng đợt gửi.`);
+      }
     },
     onWait: (ms, nghi) => {
       Object.assign(a, { waitUntil: Date.now() + ms, waitBreak: !!nghi });
-      log(a, nghi ? `Đã gửi ${cfg.nghiSauSoLan} lần, nghỉ ${Math.round(ms / 60000)} phút rồi gửi tiếp...`
-        : `Chờ ${Math.round(ms / 1000)} giây trước lần gửi tiếp theo...`, nghi ? "warn" : "info");
+      if (nghi) log(a, `Đã gửi ${cfg.nghiSauSoLan} lần, nghỉ ${Math.round(ms / 60000)} phút rồi gửi tiếp...`, "warn");
+      else log(a, `Chờ ${Math.round(ms / 1000)} giây trước lần gửi tiếp theo...`, "info", false);
+    },
+    onOutOfHours: (k) => {
+      Object.assign(a, { waitUntil: Date.now() + k.ms, waitBreak: true });
+      if (baoNgoaiGio !== k.luc) log(a, `Ngoài khung giờ gửi, tạm nghỉ đến ${k.luc} rồi gửi tiếp (bấm Dừng nếu muốn huỷ).`, "warn");
+      baoNgoaiGio = k.luc;
     },
   })
     .then((r) => log(a, r.stopped ? `Đã dừng sau ${r.sent} ${label}.` : "Hoàn tất đợt gửi.", r.stopped ? "warn" : "ok"))
@@ -179,14 +261,19 @@ function startRun(a, { batch, cfg, runBy }) {
   canRun(a);
   cfg = sanitizeConfig(cfg);
   if (!cfg.guiKetBan && !cfg.guiTinNhan) throw new Error("Đang tắt cả kết bạn lẫn tin nhắn");
-  // Số đang được tài khoản khác gửi thì bỏ qua để không ai nhận 2 lần
+  if (cfg.conLaiHomNay === 0) throw new Error("Zalo của bạn đã gửi đủ hạn mức hôm nay. Mai gửi tiếp nhé");
+  // Số đang được tài khoản khác gửi, hoặc đã gửi nhưng kết quả chưa báo được về Django: bỏ qua để không ai nhận 2 lần
   const dangGui = new Set([...accounts.values()].filter((x) => x !== a && x.running).flatMap((x) => x.pending));
+  const chuaBao = unreported();
+  const gioiHan = [cfg.gioiHanMoiLan || Infinity, cfg.conLaiHomNay ?? Infinity];   // mỗi lần / còn lại hôm nay
   batch = (Array.isArray(batch) ? batch : [])
-    .filter((r) => /^0\d{9}$/.test(String(r?.sdt)) && !dangGui.has(String(r.sdt)))
-    .slice(0, cfg.gioiHanMoiLan || undefined)      // 0 = không giới hạn
+    .filter((r) => /^0\d{9}$/.test(String(r?.sdt)) && !dangGui.has(String(r.sdt)) && !chuaBao.has(String(r.sdt)))
+    .slice(0, Math.min(...gioiHan))
     .map((r) => ({ sdt: String(r.sdt), ten: String(r.ten ?? ""), noiDung: String(r.noiDung ?? "").slice(0, 5000),
-      duAn: String(r.duAn ?? "").slice(0, 100), loiMoi: String(r.loiMoi ?? "").slice(0, 3000) }));
+      duAn: String(r.duAn ?? "").slice(0, 100), loiMoi: String(r.loiMoi ?? "").slice(0, 3000),
+      nhanVien: String(r.nhanVien ?? "").slice(0, 255) }));
   if (!batch.length) throw new Error("Không có số nào để gửi (các số còn lại đang được người khác gửi)");
+  if (cfg.conLaiHomNay != null) log(a, `Hạn mức hôm nay: còn ${cfg.conLaiHomNay} người, đợt này gửi ${batch.length} người.`);
   // Ảnh gửi kèm tin nhắn (quản trị cài), đọc 1 lần cho cả đợt
   const attachments = cfg.guiTinNhan ? loadAttachments(cfg.anh) : [];
   if (attachments.length) log(a, `Tin nhắn sẽ gửi kèm ${attachments.length} ảnh.`);
@@ -196,8 +283,9 @@ function startRun(a, { batch, cfg, runBy }) {
     task: (api, row, c) => processOne(api, row, c, attachments),
     keyOf: (r, long) => (long ? `${r.sdt} - ${r.ten || "không tên"}` : r.sdt),
     onResult: async (row, res) => {
-      // Lưu kết quả là quan trọng nhất: thử lại nhiều lần
-      await report("result", { sdt: row.sdt, ketQua: { ...res, taiKhoanZalo: a.account }, nguoiGuiId: runBy?.id ?? a.uid }, 8);
+      // Lưu kết quả là quan trọng nhất: ghi vào hàng đợi trên đĩa, gửi lại đến khi Django nhận
+      const daLuu = await reportDurable("result", { sdt: row.sdt, ketQua: { ...res, taiKhoanZalo: a.account }, nguoiGuiId: runBy?.id ?? a.uid });
+      if (!daLuu) log(a, `${row.sdt}: chưa lưu được kết quả vào web, worker sẽ tự gửi lại (số này không bị gửi 2 lần).`, "warn");
       const bad = res.ketBan === "Lỗi" || res.tinNhan === "Lỗi";
       const ten = res.tenGoiNho ? `, tên gợi nhớ “${res.tenGoiNho}”` : "";
       log(a, `${row.sdt}: kết bạn ${res.ketBan}${ten}, tin nhắn ${res.tinNhan}${res.ghiChu ? ` (${res.ghiChu})` : ""}`, bad ? "error" : "ok");
@@ -223,7 +311,7 @@ function startGroupRun(a, { groups, noiDung, anh, cfg, runBy }) {
     task: (api, g) => processGroup(api, g, job),
     keyOf: (g, long) => (long ? `nhóm “${g.ten}”` : g.ten),
     onResult: async (g, res) => {
-      await report("result_nhom", { nhomId: g.id, ketQua: { ...res, taiKhoanZalo: a.account }, nguoiGuiId: runBy?.id ?? a.uid }, 8);
+      await reportDurable("result_nhom", { nhomId: g.id, ketQua: { ...res, taiKhoanZalo: a.account }, nguoiGuiId: runBy?.id ?? a.uid });
       log(a, `Nhóm “${g.ten}”: ${res.ketQua}${res.ghiChu ? ` (${res.ghiChu})` : ""}`, res.ketQua === "Lỗi" ? "error" : "ok");
     },
   });
@@ -250,10 +338,19 @@ const send = (res, code, body) => {
   res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(body));
 };
+const MAX_BODY = 50_000_000;
 const readJson = (req) => new Promise((resolve, reject) => {
   const chunks = [];
   let size = 0;
-  req.on("data", (c) => { size += c.length; if (size > 50_000_000) req.destroy(); else chunks.push(c); });
+  req.on("data", (c) => {
+    size += c.length;
+    if (size > MAX_BODY) {
+      req.pause();
+      reject(Object.assign(new Error("Dữ liệu gửi lên quá lớn"), { status: 413 }));   // không để request treo
+      return;
+    }
+    chunks.push(c);
+  });
   req.on("end", () => { try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}); } catch (e) { reject(e); } });
   req.on("error", reject);
 });
@@ -288,10 +385,16 @@ http.createServer(async (req, res) => {
   try {
     send(res, 200, await route(url.searchParams, req.method === "POST" ? await readJson(req) : {}));
   } catch (e) {
-    send(res, 400, { error: e.message });
+    send(res, e.status || 400, { error: e.message });
+    if (e.status === 413) req.destroy();
   }
 }).listen(PORT, "127.0.0.1", () => {
   console.log(`Zalo worker đang chạy (nội bộ) tại 127.0.0.1:${PORT}. Giữ cửa sổ này mở.`);
+  secureSessionDir();
+  if (queue.length) {
+    console.log(`Còn ${queue.length} kết quả chưa báo về web từ lần chạy trước, đang gửi lại...`);
+    flushQueue(3);
+  }
   // Tự kết nối lại các tài khoản đã lưu phiên Zalo
   for (const uid of savedSessionIds()) startLogin(acc(uid));
 });

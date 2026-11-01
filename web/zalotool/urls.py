@@ -28,6 +28,7 @@ urlpatterns = [
     path("api/anh-cua-toi/xoa", v.api_anh_cua_toi_xoa),
     path("api/anh-cua-toi/<str:ten>", v.xem_anh_cua_toi),
     path("api/import", v.api_import),
+    path("api/tu-choi", v.api_tu_choi),
     path("api/preview", v.api_preview),
     path("api/reset", v.api_reset),
     path("api/zalo/login", v.api_zalo_login),

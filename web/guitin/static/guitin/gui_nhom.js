@@ -92,7 +92,7 @@ $("btnLoadGroups").onclick = async () => {
 };
 
 // ---------- nội dung & ảnh ----------
-const cacMau = (t) => String(t || "").split(/^\s*-{3,}\s*$/m).map((s) => s.trim()).filter(Boolean);
+const { cacMau } = window.Chung;   // dùng chung với trang nhân viên và server (chung.js)
 function renderMsg() {
   const n = $("msg").value.length;
   const soMau = cacMau($("msg").value).length;

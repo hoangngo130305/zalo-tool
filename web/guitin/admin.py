@@ -8,7 +8,8 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from . import services as sv
-from .models import AnhTinNhan, CaiDat, KetQua, LichSuGui, LichSuGuiNhom, NguoiDung, NguoiNhan, NhatKy
+from .models import (AnhTinNhan, CaiDat, KetQua, KhongLienHe, LichSuGui, LichSuGuiNhom, NguoiDung, NguoiNhan, NhatKy,
+                     q_thanh_cong)
 
 
 # ---------- tài khoản ----------
@@ -39,6 +40,7 @@ class NguoiDungAdmin(UserAdmin):
     fieldsets = (
         ("Thông tin", {"fields": ("email", "ho_ten", "password")}),
         ("Tin nhắn", {"fields": ("tin_nhan_mac_dinh", "loi_moi_ket_ban")}),
+        ("Giới hạn gửi của Zalo này", {"fields": ("gioi_han_ngay", "tam_dung_den")}),
         ("Phân quyền", {"fields": ("vai_tro", "is_active"),
                         "description": "Quản trị: toàn quyền, vào được trang này. Nhân viên: chỉ thấy và gửi các số được giao. "
                                        "Chỉ xem: xem tiến độ và báo cáo, không sửa được gì. Bỏ chọn “Hoạt động” để khoá tài khoản."}),
@@ -93,18 +95,20 @@ class TrangThaiFilter(admin.SimpleListFilter):
     parameter_name = "trang_thai"
 
     def lookups(self, request, model_admin):
-        return [("cho", "Chờ gửi"), ("da_gui", "Đã gửi"), ("loi", "Lỗi"), ("so_sai", "Số sai")]
+        return [("cho", "Chờ gửi"), ("da_gui", "Đã gửi"), ("loi", "Lỗi"), ("so_sai", "Số sai"), ("tu_choi", "Khách từ chối")]
 
     def queryset(self, request, qs):
         v = self.value()
         if v == "so_sai":
             return qs.filter(sdt__isnull=True)
+        if v == "tu_choi":
+            return qs.filter(tu_choi=True)
         if v == "cho":
-            return qs.filter(sdt__isnull=False, kq_tin_nhan__isnull=True)
+            return qs.filter(sdt__isnull=False, kq_tin_nhan__isnull=True, tu_choi=False)
         if v == "da_gui":
-            return qs.filter(kq_tin_nhan__isnull=False).exclude(kq_tin_nhan="Lỗi")
+            return qs.filter(q_thanh_cong("kq_"))
         if v == "loi":
-            return qs.filter(kq_tin_nhan="Lỗi")
+            return qs.filter(kq_tin_nhan__isnull=False).exclude(q_thanh_cong("kq_"))
         return qs
 
 
@@ -113,7 +117,8 @@ class NhapDanhSachForm(forms.Form):
                           help_text="File .xlsx, .xls hoặc .csv. Có dòng tên cột: SĐT (hoặc Số điện thoại / Phone), Họ tên, "
                                     "và Nội dung (không bắt buộc).")
     dan = forms.CharField(label="Hoặc dán danh sách", required=False, widget=forms.Textarea(attrs={"rows": 8}),
-                          help_text="Mỗi dòng một người: SĐT, Họ tên, Nội dung tin nhắn. Có thể copy thẳng 2–3 cột từ Excel.")
+                          help_text="Mỗi dòng một người: SĐT, Họ tên, Nội dung tin nhắn. Có thể copy thẳng 2–4 cột từ Excel "
+                                    "(SĐT, Họ tên, Nội dung, Dự án).")
     phu_trach = forms.ModelChoiceField(label="Giao cho nhân viên", required=False, queryset=NguoiDung.objects.none(),
                                        empty_label="Chưa giao (giao sau)")
     du_an = forms.CharField(label="Dự án", required=False, max_length=100,
@@ -137,10 +142,10 @@ class NguoiNhanAdmin(admin.ModelAdmin):
     change_list_template = "admin/guitin/nguoinhan/change_list.html"
     list_display = ("sdt_goc", "ten", "du_an", "noi_dung_ngan", "phu_trach", "trang_thai", "tao_luc")
     list_editable = ("phu_trach",)
-    list_filter = ("phu_trach", "du_an", TrangThaiFilter)
+    list_filter = ("phu_trach", "du_an", TrangThaiFilter, "quan_tri_giao")
     search_fields = ("sdt_goc", "sdt", "ten", "noi_dung", "du_an")
     list_per_page = 100
-    fields = ("sdt_goc", "ten", "du_an", "noi_dung", "phu_trach", "thu_tu")
+    fields = ("sdt_goc", "ten", "du_an", "noi_dung", "phu_trach", "quan_tri_giao", "thu_tu")
 
     @admin.display(description="Nội dung riêng")
     def noi_dung_ngan(self, obj):
@@ -150,17 +155,22 @@ class NguoiNhanAdmin(admin.ModelAdmin):
     actions = ["chia_deu", "gui_lai", "bo_giao"]
 
     def get_queryset(self, request):
+        from django.db.models import Exists
         kq = KetQua.objects.filter(sdt=OuterRef("sdt"))
         return super().get_queryset(request).select_related("phu_trach").annotate(
-            kq_tin_nhan=Subquery(kq.values("tin_nhan")[:1]), kq_ket_ban=Subquery(kq.values("ket_ban")[:1]))
+            kq_tin_nhan=Subquery(kq.values("tin_nhan")[:1]), kq_ket_ban=Subquery(kq.values("ket_ban")[:1]),
+            tu_choi=Exists(KhongLienHe.objects.filter(sdt=OuterRef("sdt"))))
 
     @admin.display(description="Trạng thái")
     def trang_thai(self, obj):
+        from .models import thanh_cong
         if not obj.sdt:
             return format_html('<span class="badge badge-danger">Số sai</span>')
         if obj.kq_tin_nhan is None:
+            if obj.tu_choi:
+                return format_html('<span class="badge badge-dark">Khách từ chối</span>')
             return format_html('<span class="badge badge-info">Chờ gửi</span>')
-        if obj.kq_tin_nhan == "Lỗi":
+        if not thanh_cong(obj.kq_ket_ban, obj.kq_tin_nhan):
             return format_html('<span class="badge badge-warning">Lỗi</span>')
         return format_html('<span class="badge badge-success">Đã gửi</span>')
 
@@ -171,7 +181,7 @@ class NguoiNhanAdmin(admin.ModelAdmin):
             return actions
         for u in sv.nguoi_duoc_giao():
             def giao(modeladmin, req, qs, u=u):
-                n = qs.update(phu_trach=u)
+                n = qs.update(phu_trach=u, quan_tri_giao=True)
                 sv.tang_phien_ban()
                 sv.ghi_log(f"{req.user} đã giao {n} số cho {u}.", "ok", req.user)
                 modeladmin.message_user(req, f"Đã giao {n} số cho {u}.")
@@ -198,10 +208,18 @@ class NguoiNhanAdmin(admin.ModelAdmin):
                     raise ValueError("Không đọc được số nào. Kiểm tra lại file hoặc nội dung đã dán.")
                 nv = form.cleaned_data["phu_trach"]
                 du_an = form.cleaned_data["du_an"].strip()
-                them, trung = sv.nhap_them(rows, nv, du_an)
+                kq = sv.nhap_them(rows, nv, du_an)
                 giao = (f", giao cho {nv}" if nv else " (chưa giao cho ai)") + (f", dự án {du_an}" if du_an else "")
-                sv.ghi_log(f"{request.user} đã nhập {them} số{giao}.", "ok", request.user)
-                self.message_user(request, f"Đã thêm {them} số{giao}." + (f" Bỏ qua {trung} số đã có trong danh sách." if trung else ""))
+                sv.ghi_log(f"{request.user} đã nhập {kq['them']} số{giao}.", "ok", request.user)
+                them = [f"Đã thêm {kq['them']} số{giao}."]
+                if kq["trung"]:
+                    them.append(f"Bỏ qua {kq['trung']} số đã có trong danh sách (của bạn hoặc nhân viên khác).")
+                if kq["tuChoi"]:
+                    them.append(f"Bỏ qua {kq['tuChoi']} số khách đã từ chối liên hệ.")
+                if kq["daGui"]:
+                    them.append(f"Lưu ý: {kq['daGui']} số mới thêm đã từng được gửi trước đây, sẽ không gửi lại "
+                                f"trừ khi chọn “Gửi lại”.")
+                self.message_user(request, " ".join(them))
                 return redirect(reverse("admin:guitin_nguoinhan_changelist"))
             except ValueError as e:
                 form.add_error(None, str(e))
@@ -211,7 +229,7 @@ class NguoiNhanAdmin(admin.ModelAdmin):
 
     @admin.action(description="Bỏ giao (chuyển về “chưa giao”)", permissions=["change"])
     def bo_giao(self, request, qs):
-        n = qs.update(phu_trach=None)
+        n = qs.update(phu_trach=None, quan_tri_giao=False)
         sv.tang_phien_ban()
         self.message_user(request, f"Đã bỏ giao {n} số.")
 
@@ -236,7 +254,11 @@ class NguoiNhanAdmin(admin.ModelAdmin):
         if not change:
             from django.db.models import Max
             obj.thu_tu = obj.thu_tu or (NguoiNhan.objects.aggregate(m=Max("thu_tu"))["m"] or 0) + 1
+        # Quản trị giao / đổi người phụ trách (kể cả sửa nhanh ở danh sách) thì nhân viên không xoá được số này
+        if "phu_trach" in form.changed_data and "quan_tri_giao" not in form.changed_data:
+            obj.quan_tri_giao = obj.phu_trach_id is not None
         super().save_model(request, obj, form, change)
+        sv.tang_phien_ban()
 
 
 # ---------- kết quả ----------
@@ -282,10 +304,11 @@ class KetQuaAdmin(admin.ModelAdmin):
         ws = wb.active
         ws.append(["SĐT", "Tên", "Tên Zalo", "Kết bạn", "Tin nhắn", "Ghi chú", "Thời gian", "Người bấm gửi"])
         for k in qs.select_related("nguoi_gui"):
-            ws.append([k.sdt, k.ten, k.ten_zalo, k.ket_ban, k.tin_nhan, k.ghi_chu,
-                       timezone.localtime(k.thoi_gian).strftime("%H:%M:%S %d/%m/%Y"), str(k.nguoi_gui or "")])
+            sv.dong_excel(ws, [k.sdt, k.ten, k.ten_zalo, k.ket_ban, k.tin_nhan, k.ghi_chu,
+                               timezone.localtime(k.thoi_gian).strftime("%H:%M:%S %d/%m/%Y"), str(k.nguoi_gui or "")])
         buf = io.BytesIO()
         wb.save(buf)
+        sv.ghi_log(f"{request.user} đã xuất Excel {qs.count()} kết quả gửi (trang quản trị).", nguoi_dung=request.user)
         res = HttpResponse(buf.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         res["Content-Disposition"] = 'attachment; filename="ket-qua.xlsx"'
         return res
@@ -306,8 +329,7 @@ class KetQuaGuiFilter(admin.SimpleListFilter):
         return [("ok", "Thành công"), ("loi", "Lỗi")]
 
     def queryset(self, request, qs):
-        from django.db.models import Q
-        ok = Q(tin_nhan="Đã gửi") | Q(tin_nhan="-", ket_ban="Đã gửi")
+        ok = q_thanh_cong()
         if self.value() == "ok":
             return qs.filter(ok)
         if self.value() == "loi":
@@ -345,6 +367,7 @@ class LichSuGuiAdmin(admin.ModelAdmin):
         from django.http import HttpResponse
         res = HttpResponse(sv.excel_lich_su(qs), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         res["Content-Disposition"] = 'attachment; filename="lich-su-gui.xlsx"'
+        sv.ghi_log(f"{request.user} đã xuất Excel {qs.count()} dòng lịch sử gửi (trang quản trị).", nguoi_dung=request.user)
         return res
 
 
@@ -398,10 +421,14 @@ class CaiDatAdmin(admin.ModelAdmin):
         ("Gửi gì", {"fields": ("gui_ket_ban", "gui_tin_nhan")}),
         ("Tên gợi nhớ khi kết bạn", {"fields": ("doi_ten_goi_nho", "mau_ten_goi_nho", "ten_du_an"),
                                      "description": "Sau khi gửi lời mời kết bạn, tool đặt tên gợi nhớ cho người đó trong Zalo của người gửi."}),
-        ("Giới hạn an toàn", {"fields": ("gioi_han_moi_lan", "cho_toi_thieu_giay", "cho_toi_da_giay"),
+        ("Giới hạn an toàn", {"fields": ("gioi_han_moi_ngay", "gioi_han_moi_lan", "cho_toi_thieu_giay", "cho_toi_da_giay",
+                                         "dung_khi_loi_lien_tiep", "tam_dung_gio"),
                               "description": "Nên giữ 20–30 người mỗi ngày và chờ từ 60 giây trở lên để tránh bị Zalo khoá tài khoản. "
                                              "Thời gian chờ giữa 2 lần gửi được chọn ngẫu nhiên trong khoảng tối thiểu – tối đa, "
                                              "áp dụng cho cả gửi từng người lẫn gửi vào nhóm."}),
+        ("Khung giờ gửi", {"fields": ("gio_bat_dau", "gio_ket_thuc", "nghi_chu_nhat"),
+                           "description": "Giờ Việt Nam. Ngoài khung giờ tool tự tạm nghỉ (đợt đang gửi không bị huỷ), "
+                                          "đến giờ thì gửi tiếp. Áp dụng cho cả gửi từng người lẫn gửi vào nhóm."}),
         ("Nghỉ giữa các lượt", {"fields": ("nghi_sau_so_lan", "nghi_phut"),
                                 "description": "Ví dụ: 5 lần và 15 phút = cứ gửi xong 5 người (hoặc 5 nhóm) thì nghỉ 15 phút rồi gửi tiếp. "
                                                "Để 0 lần là không nghỉ."}),
@@ -416,6 +443,35 @@ class CaiDatAdmin(admin.ModelAdmin):
     # Bấm vào "Cài đặt gửi tin" là mở thẳng trang sửa
     def changelist_view(self, request, extra_context=None):
         return redirect(reverse("admin:guitin_caidat_change", args=[CaiDat.lay().pk]))
+
+
+# ---------- khách từ chối liên hệ ----------
+@admin.register(KhongLienHe)
+class KhongLienHeAdmin(admin.ModelAdmin):
+    list_display = ("sdt", "ly_do", "nguoi_them", "thoi_gian")
+    search_fields = ("sdt", "ly_do")
+    list_filter = ("nguoi_them", ("thoi_gian", admin.DateFieldListFilter))
+    fields = ("sdt", "ly_do")
+    list_per_page = 100
+
+    def get_readonly_fields(self, request, obj=None):
+        return ("sdt",) if obj else ()
+
+    def save_model(self, request, obj, form, change):
+        if not change:
+            obj.nguoi_them = request.user
+        super().save_model(request, obj, form, change)
+        sv.tang_phien_ban()
+        sv.ghi_log(f"{request.user} đã thêm {obj.sdt} vào danh sách khách từ chối liên hệ.", "warn", request.user)
+
+    def delete_model(self, request, obj):
+        sv.ghi_log(f"{request.user} đã bỏ {obj.sdt} khỏi danh sách khách từ chối liên hệ.", "warn", request.user)
+        super().delete_model(request, obj)
+        sv.tang_phien_ban()
+
+    def delete_queryset(self, request, queryset):
+        for obj in queryset:
+            self.delete_model(request, obj)
 
 
 # ---------- nhật ký (chỉ xem) ----------

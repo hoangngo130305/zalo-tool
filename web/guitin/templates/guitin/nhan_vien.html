@@ -59,7 +59,7 @@
               <input type="text" class="search" id="duAnAll" maxlength="100" placeholder="VD: Palm City">
               <button class="btn sm" id="btnDuAnAll">Gán cho các số chưa có dự án</button>
             </div>
-            <p class="hint">File Excel gồm các cột: <b>SĐT</b>, <b>Họ tên</b>, <b>Nội dung</b>, <b>Dự án</b>. Ô Nội dung để trống thì gửi nội dung mặc định. Dùng <b>{ten}</b> để chèn họ tên. <b>Dự án</b> được ghi vào tên gợi nhớ khi kết bạn (vd “Anh Nam 0901234567 Palm City”); số mới thêm tự nhận dự án ở ô trên nếu chưa có. Số đã gửi sẽ tự bỏ qua.</p>
+            <p class="hint">File Excel gồm các cột: <b>SĐT</b>, <b>Họ tên</b>, <b>Nội dung</b>, <b>Dự án</b>. Ô Nội dung để trống thì gửi nội dung mặc định. Dùng <b>{ten}</b> để chèn họ tên. <b>Dự án</b> được ghi vào tên gợi nhớ khi kết bạn (vd “Anh Nam 0901234567 Palm City”); số mới thêm tự nhận dự án ở ô trên nếu chưa có. Số đã gửi sẽ tự bỏ qua. Dùng <b>{duan}</b>, <b>{nhanvien}</b> để chèn tên dự án, tên bạn. Số có 🔒 do quản trị giao: không xoá hay đổi SĐT được. Khách nói không muốn nhận tin thì bấm <b>Từ chối</b>: tool không bao giờ gửi cho số đó nữa.</p>
           </div>
           <div class="table-wrap">
             <table>
@@ -219,6 +219,7 @@
 </div>
 
 {{ me|json_script:"me-data" }}
+<script src="{% static 'guitin/chung.js' %}"></script>
 <script src="{% static 'guitin/nhan_vien.js' %}"></script>
 </body>
 </html>

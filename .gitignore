@@ -17,3 +17,5 @@ data/da-chuyen-sang-mysql/
 session.json
 data/anh-gui-nhom/
 data/anh-tin-nhan/
+# Kết quả gửi chưa báo được về web (worker tự gửi lại)
+data/cho-bao-cao.jsonl*

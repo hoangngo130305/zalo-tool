@@ -1,0 +1,53 @@
+{
+  "_ghi_chu": "Ví dụ dùng chung: bản Python (web/guitin), Node (src/core.js) và trình duyệt (static/guitin/chung.js) phải cho cùng kết quả. Thêm ví dụ vào đây khi sửa một trong ba bản.",
+  "chuan_hoa_sdt": [
+    ["0901234567", "0901234567"],
+    ["090 123 4567", "0901234567"],
+    ["090.123.4567", "0901234567"],
+    ["+84901234567", "0901234567"],
+    ["84901234567", "0901234567"],
+    ["901234567", "0901234567"],
+    ["01623456789", "0323456789"],
+    ["0199 123 4567", "0591234567"],
+    ["0123456789", "0123456789"],
+    ["12345", null],
+    ["", null],
+    ["abc", null],
+    ["090123456789", null]
+  ],
+  "cac_mau": [
+    ["Chào anh", ["Chào anh"]],
+    ["Mẫu 1\n---\nMẫu 2\n  -----  \nMẫu 3", ["Mẫu 1", "Mẫu 2", "Mẫu 3"]],
+    ["\n---\n\nChỉ một\n---\n", ["Chỉ một"]],
+    ["a -- b", ["a -- b"]],
+    ["", []]
+  ],
+  "dien": [
+    [["Chào {ten}", "Anh Nam", "", ""], "Chào Anh Nam"],
+    [["Chào {TEN}!", "", "", ""], "Chào bạn!"],
+    [["Dự án {duan} - NV {nhanvien}", "A", "Palm City", "Lan"], "Dự án Palm City - NV Lan"],
+    [["{ten} $& {duan}", "X$1", "", ""], "X$1 $&"]
+  ],
+  "ten_goi_nho": [
+    [["{ten} {sdt} {duan}", "Anh Nam", "0901234567", "Palm City"], "Anh Nam 0901234567 Palm City"],
+    [["{ten} - {sdt}", "", "0901234567", ""], "0901234567"],
+    [["{ten} {sdt} {duan}", "Chị Lan", "0912345678", ""], "Chị Lan 0912345678"],
+    [["", "", "0901234567", ""], "0901234567"]
+  ],
+  "thanh_cong": [
+    [["Đã gửi", "Đã gửi"], true],
+    [["Bỏ qua", "Đã gửi"], true],
+    [["Đã gửi", "-"], true],
+    [["Bỏ qua", "-"], false],
+    [["Lỗi", "Lỗi"], false],
+    [["Đã gửi", "Lỗi"], false]
+  ],
+  "doc_dong_dan": [
+    ["0901234567, Anh Nam, Chào anh, em gửi thông tin", {"sdt": "0901234567", "ten": "Anh Nam", "noiDung": "Chào anh, em gửi thông tin", "duAn": ""}],
+    ["0901234567\tAnh Nam\tChào anh\tPalm City", {"sdt": "0901234567", "ten": "Anh Nam", "noiDung": "Chào anh", "duAn": "Palm City"}],
+    ["0901234567\tAnh Nam", {"sdt": "0901234567", "ten": "Anh Nam", "noiDung": "", "duAn": ""}],
+    ["090.123.4567; Chị Lan", {"sdt": "0901234567", "ten": "Chị Lan", "noiDung": "", "duAn": ""}],
+    ["Tên khách, 0901234567", null],
+    ["", null]
+  ]
+}

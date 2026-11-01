@@ -30,7 +30,38 @@ export function sanitizeConfig(c = {}) {
     doiTenGoiNho: c.doiTenGoiNho !== false,
     mauTenGoiNho: String(c.mauTenGoiNho ?? "{ten} {sdt}"),
     anh: Array.isArray(c.anh) ? c.anh.slice(0, 10).map(String) : [],   // ảnh gửi kèm tin nhắn cho từng khách
+    // Hạn mức hôm nay của Zalo này (Django tính theo lịch sử gửi). null = không giới hạn
+    conLaiHomNay: c.conLaiHomNay == null ? null : Math.max(0, Math.round(num(c.conLaiHomNay, 0))),
+    // Gặp bấy nhiêu lỗi liên tiếp thì tự dừng (0 = không tự dừng)
+    dungKhiLoiLienTiep: Math.min(50, Math.max(0, Math.round(num(c.dungKhiLoiLienTiep, 5)))),
+    // Khung giờ gửi theo giờ Việt Nam, phút trong ngày (mặc định 8:00–20:00)
+    gioBatDau: Math.min(1439, Math.max(0, Math.round(num(c.gioBatDau, 8 * 60)))),
+    gioKetThuc: Math.min(1440, Math.max(1, Math.round(num(c.gioKetThuc, 20 * 60)))),
+    nghiChuNhat: c.nghiChuNhat === true,
   };
+}
+
+// ---------- khung giờ gửi (giờ Việt Nam, UTC+7, không đổi giờ mùa hè) ----------
+const VN_MS = 7 * 3600_000;
+const THU = ["Chủ nhật", "thứ Hai", "thứ Ba", "thứ Tư", "thứ Năm", "thứ Sáu", "thứ Bảy"];
+// Còn bao nhiêu ms nữa mới được gửi (0 = đang trong khung giờ) và lúc được gửi (dạng chữ)
+export function ngoaiKhungGio(cfg, now = Date.now()) {
+  const vn = new Date(now + VN_MS);              // đọc bằng getUTC* = giờ Việt Nam
+  const phut = vn.getUTCHours() * 60 + vn.getUTCMinutes();
+  const duocGui = (d, p) => !(cfg.nghiChuNhat && d === 0) && p >= cfg.gioBatDau && p < cfg.gioKetThuc;
+  if (cfg.gioKetThuc <= cfg.gioBatDau || duocGui(vn.getUTCDay(), phut)) return { ms: 0 };
+  // Tìm lần bắt đầu khung giờ gần nhất: hôm nay (nếu chưa tới giờ) hoặc các ngày sau
+  const dauNgay = Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), vn.getUTCDate());
+  for (let k = 0; k <= 7; k++) {
+    const batDau = dauNgay + k * 86400_000 + cfg.gioBatDau * 60_000;     // theo "giờ VN"
+    const d = new Date(batDau);
+    if (batDau > now + VN_MS && !(cfg.nghiChuNhat && d.getUTCDay() === 0)) {
+      const hh = String(d.getUTCHours()).padStart(2, "0"), mm = String(d.getUTCMinutes()).padStart(2, "0");
+      const ngay = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+      return { ms: batDau - (now + VN_MS), luc: `${hh}:${mm} ${THU[d.getUTCDay()]} ${ngay}` };
+    }
+  }
+  return { ms: 0 };
 }
 
 export const randomDelay = (cfg) => {
@@ -39,7 +70,12 @@ export const randomDelay = (cfg) => {
   return Math.floor(min + Math.random() * (max - min));
 };
 
-export const fill = (tpl, row) => tpl.replace(/\{ten\}/gi, row.ten || "bạn").trim();
+// {ten} -> tên (trống thì "bạn"), {duan} -> dự án, {nhanvien} -> nhân viên phụ trách. Giống dien() ở Django và chung.js
+export const fill = (tpl, row) => String(tpl ?? "")
+  .replace(/\{ten\}/gi, () => row.ten || "bạn")
+  .replace(/\{duan\}/gi, () => row.duAn || "")
+  .replace(/\{nhanvien\}/gi, () => row.nhanVien || "")
+  .trim();
 
 // Xáo nội dung: nhiều mẫu cách nhau bằng một dòng "---" -> chọn ngẫu nhiên 1 mẫu;
 // rồi {a|b|c} -> chọn ngẫu nhiên 1 lựa chọn. {ten} không có "|" nên không bị đụng tới.
@@ -118,9 +154,18 @@ export function loadAttachments(names = []) {
 export const newZalo = () => new Zalo({ selfListen: false, logging: false });
 export const hasZaloSession = (uid) => fs.existsSync(sessionFile(uid));
 export const clearZaloSession = (uid) => { if (hasZaloSession(uid)) fs.unlinkSync(sessionFile(uid)); };
+// Phiên chứa cookie vào được tài khoản Zalo: chỉ tài khoản hệ điều hành chạy worker được đọc
+// (0700 / 0600, có tác dụng trên Linux; trên Windows thư mục kế thừa quyền của thư mục tool)
+export function secureSessionDir() {
+  fs.mkdirSync(SESSION_DIR, { recursive: true, mode: 0o700 });
+  try {
+    fs.chmodSync(SESSION_DIR, 0o700);
+    for (const f of fs.readdirSync(SESSION_DIR)) fs.chmodSync(path.join(SESSION_DIR, f), 0o600);
+  } catch {}
+}
 function saveZaloSession(uid, creds) {
-  fs.mkdirSync(SESSION_DIR, { recursive: true });
-  fs.writeFileSync(sessionFile(uid), JSON.stringify(creds));
+  secureSessionDir();
+  fs.writeFileSync(sessionFile(uid), JSON.stringify(creds), { mode: 0o600 });
 }
 // Id các tài khoản đã có phiên Zalo lưu sẵn
 export function savedSessionIds() {
@@ -168,6 +213,8 @@ export async function loginWithQR(zalo, uid, onEvent) {
 
 // ---------- xử lý 1 người ----------
 // attachments: ảnh gửi kèm tin nhắn (đọc sẵn 1 lần cho cả đợt)
+// loiZalo = true khi chính Zalo báo lỗi (thường do bị giới hạn tìm số / kết bạn / nhắn tin), dùng để tự dừng đợt gửi.
+// SĐT chưa đăng ký Zalo (Zalo trả mã 216, không báo lỗi) thì không tính.
 export async function processOne(api, row, cfg, attachments = []) {
   const result = { ten: row.ten, ketBan: "-", tinNhan: "-", thoiGian: new Date().toISOString() };
 
@@ -175,7 +222,7 @@ export async function processOne(api, row, cfg, attachments = []) {
   try {
     user = await api.findUser(row.sdt);
   } catch (e) {
-    return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: `Không tìm thấy Zalo: ${e.message}` };
+    return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: `Không tìm thấy Zalo: ${e.message}`, loiZalo: true };
   }
   if (!user?.uid) return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: "SĐT chưa đăng ký Zalo hoặc chặn tìm kiếm" };
   result.tenZalo = user.display_name || user.zalo_name;
@@ -189,6 +236,7 @@ export async function processOne(api, row, cfg, attachments = []) {
       // Đã là bạn / đã gửi lời mời trước đó vẫn tính là ok để tiếp tục nhắn
       result.ketBan = "Bỏ qua";
       result.ghiChu = `Kết bạn: ${e.message}`;
+      if (!cfg.guiTinNhan) result.loiZalo = true;    // chỉ kết bạn mà kết bạn lỗi: coi như lỗi
     }
     await sleep(3000 + Math.random() * 4000);
   }
@@ -216,6 +264,7 @@ export async function processOne(api, row, cfg, attachments = []) {
     } catch (e) {
       result.tinNhan = "Lỗi";
       result.ghiChu = [result.ghiChu, `Tin nhắn: ${e.message}`].filter(Boolean).join(" | ");
+      result.loiZalo = true;
     }
   }
   return result;
@@ -236,6 +285,7 @@ export async function processGroup(api, group, job) {
   } catch (e) {
     result.ketQua = "Lỗi";
     result.ghiChu = e.message;
+    result.loiZalo = true;
   }
   return result;
 }
@@ -258,8 +308,15 @@ export async function listGroups(api) {
 // task(api, item, cfg) xử lý 1 mục (mặc định: kết bạn + nhắn tin 1 người).
 // wait(ms) cho phép bên gọi tự quyết cách chờ (để bấm Dừng giữa chừng).
 // Giữa 2 lần gửi chờ ngẫu nhiên choToiThieuGiay–choToiDaGiay; cứ nghiSauSoLan lần thì nghỉ nghiPhut phút.
-export async function runBatch({ api, cfg, batch, task = processOne, onStart, onResult, onWait, shouldStop = () => false, wait = sleep }) {
+// Ngoài khung giờ gửi thì chờ đến giờ (onOutOfHours báo cho bên gọi).
+export async function runBatch({ api, cfg, batch, task = processOne, onStart, onResult, onWait, onOutOfHours,
+  shouldStop = () => false, wait = sleep }) {
   for (let i = 0; i < batch.length; i++) {
+    if (shouldStop()) return { stopped: true, sent: i };
+    for (let k = ngoaiKhungGio(cfg); k.ms > 0 && !shouldStop(); k = ngoaiKhungGio(cfg)) {
+      onOutOfHours?.(k);
+      await wait(Math.min(k.ms, 3600_000));   // tối đa 1 giờ rồi xem lại (máy ngủ / đổi giờ)
+    }
     if (shouldStop()) return { stopped: true, sent: i };
     const row = batch[i];
     onStart?.(row, i, batch.length);
