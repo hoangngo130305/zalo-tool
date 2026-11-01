@@ -78,9 +78,9 @@ Trang **/gui-nhom/** (nhân viên: tab **Gửi vào nhóm Zalo**; quản trị: 
   **Nghỉ giữa các lượt** để tool tự nghỉ sau mỗi X người.
 
 ### An toàn tài khoản Zalo (/admin/ → Cài đặt gửi tin → Giới hạn an toàn, Khung giờ gửi)
-- **Tối đa người mỗi ngày (mỗi Zalo)**: mặc định 30. Đếm theo lịch sử gửi trong ngày (kể cả lần lỗi), đủ thì tool
+- **Tối đa người mỗi ngày (mỗi Zalo)**: mặc định `0` = không giới hạn. Đặt số (nên 20–30) thì đếm theo lịch sử gửi trong ngày (kể cả lần lỗi), đủ thì tool
   tự dừng, mai gửi tiếp. Đặt riêng cho từng nhân viên trong Tài khoản → *Tối đa người/ngày của Zalo này*
-  (Zalo mới nên để thấp, vd 10/ngày tuần đầu). `0` = không giới hạn.
+  (Zalo mới nên để thấp, vd 10/ngày tuần đầu).
 - **Tự dừng sau số lỗi liên tiếp** (mặc định 5): Zalo báo lỗi liền nhiều lần (thường do bị hạn chế tìm số / kết bạn)
   thì tool tự dừng và **tạm dừng Zalo đó** trong *Tạm dừng sau khi tự dừng* giờ (mặc định 24). Số chưa đăng ký Zalo
   không tính là lỗi. Bỏ tạm dừng sớm: Tài khoản → xoá ô *Tạm dừng gửi đến*.

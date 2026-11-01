@@ -290,9 +290,9 @@ class CaiDat(models.Model):
         help_text="0 = không giới hạn: bấm gửi một lần là tool gửi hết danh sách chờ. "
                   "Nên bật “Nghỉ giữa các lượt” để tool tự nghỉ sau mỗi X người.")
     gioi_han_moi_ngay = models.PositiveSmallIntegerField(
-        "Tối đa người mỗi ngày (mỗi Zalo)", default=30, validators=[MaxValueValidator(500)],
-        help_text="Mỗi tài khoản Zalo gửi tối đa bấy nhiêu người mỗi ngày, đủ thì tool tự dừng, mai gửi tiếp. "
-                  "Nên 20–30. Đặt riêng cho từng nhân viên trong Tài khoản. 0 = không giới hạn (dễ bị Zalo khoá).")
+        "Tối đa người mỗi ngày (mỗi Zalo)", default=0, validators=[MaxValueValidator(500)],
+        help_text="0 = không giới hạn (mặc định). Đặt số thì mỗi tài khoản Zalo gửi tối đa bấy nhiêu người mỗi ngày, "
+                  "đủ thì tool tự dừng, mai gửi tiếp (nên 20–30 để tránh bị Zalo khoá). Đặt riêng cho từng nhân viên trong Tài khoản.")
     dung_khi_loi_lien_tiep = models.PositiveSmallIntegerField(
         "Tự dừng sau số lỗi liên tiếp", default=5, validators=[MaxValueValidator(50)],
         help_text="Gặp bấy nhiêu lỗi liên tiếp (thường do Zalo đang hạn chế tìm số / kết bạn) thì tự dừng đợt gửi "
