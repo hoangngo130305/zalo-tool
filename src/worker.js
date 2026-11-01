@@ -148,7 +148,9 @@ async function finishLogin(a, api) {
   log(a, `Đã kết nối Zalo: ${a.account}`, "ok");
 }
 
-async function startLogin(a, { useSession = true } = {}) {
+// auto = true: worker tự kết nối lại lúc khởi động. Phiên hết hạn thì chỉ báo, không tự tạo mã QR
+// (không ai quét, mã QR sẽ tự làm mới mãi và ghi đầy nhật ký).
+async function startLogin(a, { useSession = true, auto = false } = {}) {
   if (a.login === "checking" || a.login === "qr") return;
   a.login = "checking";
 
@@ -160,12 +162,18 @@ async function startLogin(a, { useSession = true } = {}) {
       notify(`phiên Zalo của tài khoản #${a.uid} đã hết hạn, cần quét QR lại.`);
     }
   }
+  if (auto) {
+    a.login = "out";
+    return;
+  }
 
   log(a, "Đang tạo mã QR, mở app Zalo trên điện thoại để quét.");
+  let boQua = false;     // mã QR hết hạn quá số lần cho phép
   try {
     const api = await loginWithQR(newZalo(), a.uid, async (ev) => {
       if (ev.type === "qr") Object.assign(a, { login: "qr", qr: `data:image/png;base64,${ev.image}`, qrActions: ev.actions });
       else if (ev.type === "expired") log(a, "Mã QR hết hạn, đang tạo mã mới...", "warn");
+      else if (ev.type === "gaveup") boQua = true;
       else if (ev.type === "scanned") log(a, `Đã quét bởi ${ev.name}. Bấm xác nhận trên điện thoại.`);
       else if (ev.type === "declined") log(a, "Đăng nhập bị từ chối trên điện thoại.", "warn");
     });
@@ -174,7 +182,8 @@ async function startLogin(a, { useSession = true } = {}) {
   } catch (e) {
     Object.assign(a, { login: "out", qr: null, qrActions: null });
     // Người dùng bấm Huỷ thì không coi là lỗi
-    if (/abort|huỷ/i.test(e.message)) log(a, "Đã huỷ kết nối Zalo.", "warn");
+    if (boQua) log(a, "Không ai quét mã QR nên đã dừng tạo mã. Bấm “Kết nối Zalo” để tạo mã mới.", "warn");
+    else if (/abort|huỷ/i.test(e.message)) log(a, "Đã huỷ kết nối Zalo.", "warn");
     else log(a, `Không kết nối được Zalo: ${e.message}`, "error");
   }
 }
@@ -396,5 +405,5 @@ http.createServer(async (req, res) => {
     flushQueue(3);
   }
   // Tự kết nối lại các tài khoản đã lưu phiên Zalo
-  for (const uid of savedSessionIds()) startLogin(acc(uid));
+  for (const uid of savedSessionIds()) startLogin(acc(uid), { auto: true });
 });

@@ -28,6 +28,10 @@ function api() {
 }
 
 export class Zalo {
-  async login() { return api(); }
+  // Phiên ghi {"hetHan": true} thì coi như phiên đã hết hạn
+  async login(creds) {
+    if (creds?.hetHan) throw new Error("Zalo giả: phiên đã hết hạn");
+    return api();
+  }
   async loginQR() { throw new Error("Zalo giả không hỗ trợ QR"); }
 }

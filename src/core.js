@@ -183,15 +183,22 @@ export async function loginWithSession(zalo, uid) {
   }
 }
 
-// onEvent nhận: { type: "qr", image, actions } | { type: "expired" } | { type: "scanned", name } | { type: "declined" }
-export async function loginWithQR(zalo, uid, onEvent) {
+// onEvent nhận: { type: "qr", image, actions } | { type: "expired" } | { type: "gaveup" } | { type: "scanned", name }
+// | { type: "declined" }. Mã QR hết hạn thì tạo mã mới tối đa maxRetry lần, sau đó dừng (gaveup).
+export async function loginWithQR(zalo, uid, onEvent, maxRetry = 3) {
   let creds = null;
+  let retries = 0;
   const api = await zalo.loginQR({ qrPath: path.join(ROOT, `qr-${Number(uid)}.png`) }, async (ev) => {
     switch (ev.type) {
       case LoginQRCallbackEventType.QRCodeGenerated:
         await onEvent({ type: "qr", image: ev.data.image, actions: ev.actions });
         break;
       case LoginQRCallbackEventType.QRCodeExpired:
+        if (++retries > maxRetry) {
+          onEvent({ type: "gaveup" });
+          ev.actions.abort();
+          break;
+        }
         onEvent({ type: "expired" });
         ev.actions.retry();
         break;

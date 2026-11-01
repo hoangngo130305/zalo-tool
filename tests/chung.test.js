@@ -6,7 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
-import { cacMau, fill, tenGoiNho, sanitizeConfig, ngoaiKhungGio, runBatch, processOne } from "../src/core.js";
+import { LoginQRCallbackEventType as QR } from "zca-js";
+import { cacMau, fill, tenGoiNho, sanitizeConfig, ngoaiKhungGio, runBatch, processOne, loginWithQR } from "../src/core.js";
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const VD = JSON.parse(fs.readFileSync(path.join(DIR, "vi-du-chung.json"), "utf8"));
@@ -105,4 +106,26 @@ test("runBatch: dừng khi được yêu cầu, không chờ ngoài giờ khi kh
   });
   assert.deepEqual(sent, [1, 2]);
   assert.equal(r.stopped, true);
+});
+
+test("mã QR hết hạn: chỉ tạo mã mới tối đa 3 lần rồi dừng (không lặp mãi)", async () => {
+  let taoMa = 0;
+  const su_kien = [];
+  const zalo = {
+    loginQR: async (_, cb) => {
+      let dung = false;
+      const actions = { retry: () => {}, abort: () => { dung = true; } };
+      while (!dung && taoMa < 20) {
+        taoMa++;
+        await cb({ type: QR.QRCodeGenerated, data: { image: "x" }, actions });
+        await cb({ type: QR.QRCodeExpired, actions });
+      }
+      return null;
+    },
+  };
+  const api = await loginWithQR(zalo, 1, (ev) => su_kien.push(ev.type));
+  assert.equal(api, null);
+  assert.equal(taoMa, 4);                     // mã đầu + 3 lần làm mới
+  assert.equal(su_kien.filter((t) => t === "expired").length, 3);
+  assert.equal(su_kien.at(-1), "gaveup");
 });
