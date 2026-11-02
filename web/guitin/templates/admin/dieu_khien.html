@@ -1,4 +1,5 @@
 {% extends "admin/index.html" %}
+{% load static %}
 {% block content_title %} Bảng điều khiển {% endblock %}
 
 {% block extrastyle %}{{ block.super }}
@@ -11,6 +12,16 @@
   .zt-staff td.n, .zt-staff th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .zt-bar { height: 8px; }
   .zt-num { font-variant-numeric: tabular-nums; }
+  .chart { margin: 6px 0; overflow-x: auto; }
+  .chart svg { width: 100%; min-width: 520px; height: auto; display: block; }
+  .chart .ax { font-size: 10px; fill: #6c757d; }
+  .chart .grid { stroke: #e9ecef; stroke-width: 1; }
+  .chart .b-gui { fill: #dbe7fb; stroke: #1f5fc4; stroke-width: .5; }
+  .chart .b-ok { fill: #28a745; opacity: .75; }
+  .chart .b-dy { fill: #f39c12; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: #6c757d; margin-top: 4px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .legend i.b-gui { background: #dbe7fb; border: 1px solid #1f5fc4; } .legend i.b-ok { background: #28a745; } .legend i.b-dy { background: #f39c12; border-radius: 50%; }
 </style>
 {% endblock %}
 
@@ -99,6 +110,7 @@
             <a class="btn btn-outline-secondary btn-sm" href="{% url 'admin:guitin_lichsugui_changelist' %}"><i class="fas fa-history"></i> Lịch sử gửi</a>
             <a class="btn btn-outline-secondary btn-sm" href="{% url 'admin:guitin_caidat_changelist' %}"><i class="fas fa-sliders-h"></i> Nội dung tin & cài đặt</a>
             <a class="btn btn-outline-secondary btn-sm" href="{% url 'admin:guitin_nguoinhan_nhap' %}"><i class="fas fa-file-import"></i> Nhập danh sách</a>
+            <a class="btn btn-outline-secondary btn-sm" href="{% url 'admin:tinh_trang' %}"><i class="fas fa-heartbeat"></i> Tình trạng hệ thống</a>
           </div>
         </div>
       </div>
@@ -116,11 +128,62 @@
       </table>
     </div>
   </div>
+
+  <!-- Báo cáo theo thời gian -->
+  <div class="card card-outline card-info">
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-chart-bar"></i> Báo cáo theo thời gian</h3>
+      <div class="card-tools">
+        <form class="form-inline" id="bcForm" style="gap:6px">
+          <input type="date" id="bcTu" class="form-control form-control-sm" aria-label="Từ ngày">
+          <input type="date" id="bcDen" class="form-control form-control-sm" aria-label="Đến ngày">
+          <button class="btn btn-sm btn-info" type="submit">Xem</button>
+        </form>
+      </div></div>
+    <div class="card-body">
+      <div class="row text-center mb-2" id="bcTong"></div>
+      <div id="bcChart" class="chart"></div>
+      <div class="row mt-3">
+        <div class="col-lg-6"><h6>Xếp hạng nhân viên</h6>
+          <table class="table table-sm zt-staff"><thead><tr><th>Nhân viên</th><th class="n">Đã gửi</th><th class="n">Thành công</th><th class="n">Đồng ý KB</th><th class="n">Trả lời</th></tr></thead><tbody id="bcNv"></tbody></table></div>
+        <div class="col-lg-6"><h6>So sánh dự án</h6>
+          <table class="table table-sm zt-staff"><thead><tr><th>Dự án</th><th class="n">Đã gửi</th><th class="n">Thành công</th><th class="n">Tỷ lệ</th></tr></thead><tbody id="bcDa"></tbody></table>
+          <h6 class="mt-3">Chiến dịch</h6>
+          <table class="table table-sm zt-staff"><thead><tr><th>Chiến dịch</th><th class="n">Khách</th><th class="n">Đã gửi</th><th class="n">Thành công</th><th class="n">Đồng ý KB</th><th class="n">Trả lời</th></tr></thead><tbody id="bcCd"></tbody></table></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 {{ block.super }}
 
 {{ thong_ke|json_script:"zt-thong-ke" }}
+<script src="{% static 'guitin/chung.js' %}"></script>
+<script>
+(function () {
+  // Báo cáo theo thời gian: biểu đồ theo ngày, xếp hạng nhân viên, dự án, chiến dịch
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const pt = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : "–");
+  async function tai() {
+    try {
+      const q = new URLSearchParams({ tu: $("bcTu").value, den: $("bcDen").value });
+      const res = await fetch(`/api/bao-cao?${q}`);
+      const r = await res.json();
+      if (!res.ok) throw new Error(r.error || "Lỗi");
+      $("bcTu").value = r.tu; $("bcDen").value = r.den;
+      const t = r.tong;
+      const o = (ten, v, phu) => `<div class="col"><div class="small text-muted">${ten}</div><b class="zt-num">${v}</b>${phu ? ` <small class="text-muted">${phu}</small>` : ""}</div>`;
+      $("bcTong").innerHTML = o("Đã gửi", t.gui) + o("Thành công", t.thanhCong, pt(t.thanhCong, t.gui)) + o("Đồng ý kết bạn", t.dongY) + o("Trả lời", t.traLoi);
+      window.Chung.veBieuDo($("bcChart"), r.theoNgay);
+      $("bcNv").innerHTML = r.nhanVien.map((n, i) => `<tr><td>${i + 1}. ${esc(n.ten)}</td><td class="n">${n.gui}</td><td class="n">${n.thanhCong} <small class="text-muted">${pt(n.thanhCong, n.gui)}</small></td><td class="n">${n.dongY}</td><td class="n">${n.traLoi}</td></tr>`).join("") || '<tr><td colspan="5" class="text-muted">Chưa có dữ liệu.</td></tr>';
+      $("bcDa").innerHTML = r.duAn.map((d) => `<tr><td>${esc(d.duAn)}</td><td class="n">${d.gui}</td><td class="n">${d.thanhCong}</td><td class="n">${pt(d.thanhCong, d.gui)}</td></tr>`).join("") || '<tr><td colspan="4" class="text-muted">Chưa có dữ liệu.</td></tr>';
+      $("bcCd").innerHTML = r.chienDich.map((c) => `<tr><td>${esc(c.ten)}${c.dangChay ? "" : ' <span class="badge badge-secondary">đã dừng</span>'}</td><td class="n">${c.tong}</td><td class="n">${c.gui}</td><td class="n">${c.thanhCong}</td><td class="n">${c.dongY}</td><td class="n">${c.traLoi}</td></tr>`).join("") || '<tr><td colspan="6" class="text-muted">Chưa có chiến dịch.</td></tr>';
+    } catch (e) { $("bcTong").innerHTML = `<div class="col text-danger">${esc(e.message)}</div>`; }
+  }
+  $("bcForm").onsubmit = (e) => { e.preventDefault(); tai(); };
+  tai();
+})();
+</script>
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);

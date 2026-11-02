@@ -1,0 +1,16 @@
+# Lịch tự động: hẹn giờ gửi, nhắc lại khách chưa trả lời, phát hiện đợt gửi bị gián đoạn, email báo cáo định kỳ.
+# Cài: sudo cp deploy/zalo-tool-lich.service /etc/systemd/system/ && sudo systemctl enable --now zalo-tool-lich
+[Unit]
+Description=Zalo Tool - lich tu dong (hen gio, nhac lai, bao cao email)
+After=network.target mysql.service zalo-tool-web.service zalo-tool-worker.service
+
+[Service]
+User=demo
+WorkingDirectory=/home/demo/apps/zalo-tool/web
+ExecStart=/home/demo/apps/zalo-tool/venv/bin/python manage.py chay_lich --lap 60
+Restart=always
+RestartSec=10
+Environment=PYTHONIOENCODING=utf-8
+
+[Install]
+WantedBy=multi-user.target

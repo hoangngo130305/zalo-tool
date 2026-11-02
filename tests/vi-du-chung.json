@@ -28,6 +28,17 @@
     [["Dự án {duan} - NV {nhanvien}", "A", "Palm City", "Lan"], "Dự án Palm City - NV Lan"],
     [["{ten} $& {duan}", "X$1", "", ""], "X$1 $&"]
   ],
+  "dien_them": [
+    [["Chào {xungho} {ten}, căn {CanHo} giá {gia}", "Nam", {"xungho": "anh", "canho": "A12", "Giá": "3 tỷ"}], "Chào anh Nam, căn A12 giá 3 tỷ"],
+    [["{Chào|Hi} {ten} {khongco}", "Lan", {"xungho": "chị"}], "{Chào|Hi} Lan {khongco}"],
+    [["Gọi {sdt_nhanvien}", "", {"sdt_nhanvien": "0909"}], "Gọi 0909"]
+  ],
+  "canh_bao": [
+    [["Chào anh", "tin_nhan", ["giảm giá sốc"]], 0],
+    [["Ưu đãi GIẢM GIÁ SỐC hôm nay", "tin_nhan", ["giảm giá sốc"]], 1],
+    [["Mẫu 1\n---\nxem www.a.vn và https://b.vn !!!!", "tin_nhan", []], 2],
+    [["0123456789 0123456789 0123456789 0123456789 0123456789 0123456789 0123456789 0123456789 0123456789 0123456789 0123456789 0123456789 0123456789 0123456789 0123456789", "loi_moi", []], 1]
+  ],
   "ten_goi_nho": [
     [["{ten} {sdt} {duan}", "Anh Nam", "0901234567", "Palm City"], "Anh Nam 0901234567 Palm City"],
     [["{ten} - {sdt}", "", "0901234567", ""], "0901234567"],

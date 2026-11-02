@@ -19,3 +19,6 @@ data/anh-gui-nhom/
 data/anh-tin-nhan/
 # Kết quả gửi chưa báo được về web (worker tự gửi lại)
 data/cho-bao-cao.jsonl*
+# Tool tự tạo khi chạy
+data/chay-lich.txt
+data/tam-nhap/

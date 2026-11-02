@@ -129,3 +129,22 @@ test("mã QR hết hạn: chỉ tạo mã mới tối đa 3 lần rồi dừng (
   assert.equal(su_kien.filter((t) => t === "expired").length, 3);
   assert.equal(su_kien.at(-1), "gaveup");
 });
+
+test("điền biến thêm {xungho} {sdt_nhanvien} cột Excel (trình duyệt)", () => {
+  for (const [[tpl, ten, them], ra] of VD.dien_them) assert.equal(Chung.fill(tpl, ten, "", "", them), ra);
+});
+
+test("cảnh báo tin dài / dễ bị coi là spam (trình duyệt)", () => {
+  for (const [[text, loai, tu], so] of VD.canh_bao) assert.equal(Chung.canhBao(text, loai, tu).length, so, text.slice(0, 30));
+});
+
+test("processOne: nhắc lại dùng Zalo ID có sẵn, không kết bạn lại", async () => {
+  const goi = [];
+  const api = fakeApi({ findUser: async () => { goi.push("tim"); return { uid: "x" }; },
+    sendFriendRequest: async () => goi.push("ketban"), sendMessage: async (m, uid) => goi.push(`tin:${uid}`) });
+  const cfg = sanitizeConfig({});
+  const r = await processOne(api, { sdt: "0901234567", kieu: "nhac", zaloUid: "u99", noiDung: "Nhắc anh" }, cfg);
+  assert.deepEqual(goi, ["tin:u99"]);
+  assert.equal(r.tinNhan, "Đã gửi");
+  assert.equal(r.zaloUid, "u99");
+});

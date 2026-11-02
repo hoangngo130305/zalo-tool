@@ -103,6 +103,33 @@ npm test
 ```
 Bộ ví dụ chung `tests/vi-du-chung.json` đảm bảo bản Python, Node và trang web (`chung.js`) chuẩn hoá SĐT,
 tách mẫu, điền `{ten}`… cho cùng kết quả. Sửa một bản thì thêm ví dụ vào file này.
+Chạy thử worker thật mà không cần Zalo: `node --import ./tests/zalo-gia/dang-ky.mjs src/worker.js` (Zalo giả, đồng hồ chạy nhanh).
+
+### Chăm sóc khách, chiến dịch
+- **Chiến dịch** (/admin/ → Chiến dịch): tên, dự án, nội dung, thời gian riêng. Một khách nằm được trong nhiều chiến dịch;
+  “Không nhắn cùng khách quá 1 lần trong N ngày” (Cài đặt gửi tin) chặn nhắn dồn. Báo cáo + xuất Excel theo chiến dịch.
+- **Theo dõi phản hồi**: worker nghe sự kiện Zalo, ghi khách **đồng ý kết bạn** và **nhắn lại** (không lưu nội dung khách nhắn).
+  Trang nhân viên có cột *Khách* (✓ đồng ý, 💬 trả lời, trạng thái chăm sóc: Quan tâm, Hẹn xem nhà…). /admin/ → Khách hàng.
+- **Tự gửi tin khi khách đồng ý kết bạn**: gửi lại tin chính nếu tin đầu chưa tới (khách chặn người lạ), hoặc gửi “Tin khi
+  đồng ý” nếu có soạn. **Nhắc lại** khách chưa trả lời sau N ngày (một lần). Cả hai trong khung giờ gửi, tính vào hạn mức.
+- Biến nội dung: `{ten}` `{duan}` `{nhanvien}` `{sdt_nhanvien}` `{xungho}` và mọi cột thêm trong file Excel (`{canho}`…).
+- **Thư viện mẫu tin** (/admin/ → Thư viện mẫu tin nhắn): quản trị duyệt, nhân viên chọn. Trang gửi tin cảnh báo tin quá dài
+  hoặc có “từ dễ bị coi là spam” (sửa danh sách từ trong Cài đặt gửi tin).
+- **Đợt gửi** được lưu lại; worker khởi động lại giữa đợt thì trang nhân viên hiện nút **Tiếp tục đợt bị gián đoạn**.
+- **Hẹn giờ gửi** (một lần / hằng ngày / hằng tuần) ở trang gửi tin và trang gửi nhóm. **Bộ nhóm** lưu sẵn, **nội dung
+  riêng từng nhóm**, thời gian chờ riêng cho gửi nhóm (Cài đặt gửi tin → Gửi vào nhóm).
+- **Trưởng nhóm**: vai trò mới, cùng tên *Đội* với nhân viên thì xem và giao số cho đội ở trang **Đội của tôi**.
+- **Báo cáo**: bảng điều khiển có biểu đồ theo ngày, xếp hạng nhân viên, so sánh dự án, chiến dịch; nhân viên có tab Báo cáo.
+- **Email báo cáo** (Cài đặt gửi tin → Báo cáo qua email): file Excel cuối ngày / cuối tuần gửi qua Gmail bằng
+  *mật khẩu ứng dụng* (myaccount.google.com → Bảo mật → Xác minh 2 bước → Mật khẩu ứng dụng). Bấm “Gửi thử báo cáo ngay”.
+- **Nhập danh sách** 2 bước: xem trước (số hợp lệ, trùng với ai, đã gửi, khách từ chối), chọn cột thủ công, ghi *Nguồn danh sách*.
+- **Dữ liệu cá nhân**: Khách hàng / Người nhận → thao tác “Xoá dữ liệu của các khách đã chọn (khách yêu cầu)”; tắt “Nhân viên
+  được xuất Excel” nếu chỉ quản trị được tải dữ liệu.
+
+### Vận hành trên server
+- `zalo-tool-web`, `zalo-tool-worker`, `zalo-tool-lich` (lịch tự động: `manage.py chay_lich --lap 60`, file mẫu trong `deploy/`).
+- Sao lưu hằng đêm: cron `0 2 * * * deploy/sao-luu.sh` (MySQL + `data/`, giữ 14 bản trong `~/sao-luu`).
+- /admin/ → **Tình trạng hệ thống**: worker, từng Zalo, database, ổ đĩa, sao lưu gần nhất, kết quả chưa lưu, lịch tự động.
 
 ### Ảnh kèm tin nhắn khách, xáo nội dung
 - **Ảnh kèm tin nhắn khách**: /admin/ → Cài đặt gửi tin → mục **Hình ảnh gửi kèm tin nhắn** (tối đa 10 ảnh JPG/PNG/WEBP,

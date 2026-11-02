@@ -1,0 +1,27 @@
+{% extends "admin/base_site.html" %}
+{% block content_title %} Tình trạng hệ thống {% endblock %}
+{% block breadcrumbs %}
+<ol class="breadcrumb float-sm-right">
+  <li class="breadcrumb-item"><a href="{% url 'admin:index' %}">Bảng điều khiển</a></li>
+  <li class="breadcrumb-item active">Tình trạng hệ thống</li>
+</ol>
+{% endblock %}
+{% block content %}
+<div class="card card-outline card-primary">
+  <div class="card-body p-0">
+    <table class="table table-sm mb-0">
+      <thead><tr><th style="width:36px"></th><th style="width:28%">Mục</th><th>Chi tiết</th></tr></thead>
+      <tbody>
+      {% for m in muc %}
+        <tr>
+          <td class="text-center">{% if m.ok is None %}<i class="fas fa-info-circle text-secondary"></i>{% elif m.ok %}<i class="fas fa-check-circle text-success"></i>{% else %}<i class="fas fa-exclamation-triangle text-danger"></i>{% endif %}</td>
+          <td><b>{{ m.ten }}</b></td>
+          <td>{{ m.chi_tiet }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer small text-muted">Tải lại trang để cập nhật. Sao lưu tự động chạy hằng đêm (giữ 14 bản gần nhất).</div>
+</div>
+{% endblock %}

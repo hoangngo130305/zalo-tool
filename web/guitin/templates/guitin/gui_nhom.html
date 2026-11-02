@@ -42,11 +42,18 @@
             <button class="btn sm" id="btnSelectAll">Chọn tất cả</button>
             <button class="btn sm" id="btnSelectNone">Bỏ chọn hết</button>
           </div>
+          <div class="toolbar">
+            <label class="hint" for="boNhomSel"><b>Bộ nhóm</b></label>
+            <select id="boNhomSel"><option value="">Chọn bộ nhóm đã lưu...</option></select>
+            <button class="btn sm" id="btnLuuBo">Lưu nhóm đang chọn thành bộ</button>
+            <button class="btn sm link hidden" id="btnXoaBo">Xoá bộ này</button>
+          </div>
           <p class="hint" id="groupHint">Bấm <b>Tải danh sách nhóm</b> để lấy các nhóm mà Zalo của bạn đang tham gia, rồi tick các nhóm muốn gửi. Lựa chọn được lưu lại cho lần sau.</p>
+          <p class="hint" style="margin:0">Bấm <b>✎</b> ở nhóm đã chọn để soạn <b>nội dung riêng</b> cho nhóm đó (để trống thì dùng nội dung chung ở mục 2). <b>Bộ nhóm</b>: lưu các nhóm hay gửi (vd “Nhóm BĐS Q7”) để chọn nhanh và hẹn giờ gửi định kỳ.</p>
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th style="width:36px"></th><th>Tên nhóm</th><th class="n">Thành viên</th></tr></thead>
+            <thead><tr><th style="width:36px"></th><th>Tên nhóm</th><th class="n">Thành viên</th><th>Nội dung riêng</th></tr></thead>
             <tbody id="groupBody"></tbody>
           </table>
           <div class="empty hidden" id="groupEmpty"></div>
@@ -57,7 +64,8 @@
         <div class="card-h"><span class="num">2</span><h2>Nội dung &amp; hình ảnh</h2><span class="saved" id="msgSaved"></span></div>
         <div class="card-b">
           <label class="f" for="msg">
-            <span class="row">Nội dung tin nhắn <span class="count" id="msgCount"></span></span>
+            <span class="row">Nội dung tin nhắn <span class="count" id="msgCount"></span>
+              <select id="mauMsg" class="mau hidden" aria-label="Chọn mẫu tin"><option value="">Chọn mẫu có sẵn...</option></select></span>
             <textarea id="msg" rows="6" maxlength="5000" placeholder="Soạn nội dung gửi vào các nhóm đã chọn..."></textarea>
           </label>
           <div class="row">
@@ -110,6 +118,28 @@
             <button class="btn danger solid big hidden" id="btnStop">Dừng</button>
           </div>
           <div class="hint" id="runHint"></div>
+          <details class="hen" id="henBox">
+            <summary><b>Hẹn giờ gửi nhóm</b> <span class="count" id="henCount"></span></summary>
+            <div class="hen-form">
+              <label>Gửi vào
+                <select id="henBo"><option value="">Các nhóm đang chọn</option></select>
+              </label>
+              <label>Lặp lại
+                <select id="henLap"><option value="hang_tuan">Hằng tuần</option><option value="hang_ngay">Hằng ngày</option><option value="mot_lan">Một lần</option></select>
+              </label>
+              <label id="henLucBox" class="hidden">Lúc<input type="datetime-local" id="henLuc"></label>
+              <label id="henGioBox">Giờ<input type="time" id="henGio" value="08:00"></label>
+              <div id="henThuBox" class="henthu">
+                <label><input type="checkbox" value="0" checked>T2</label><label><input type="checkbox" value="1">T3</label>
+                <label><input type="checkbox" value="2">T4</label><label><input type="checkbox" value="3">T5</label>
+                <label><input type="checkbox" value="4">T6</label><label><input type="checkbox" value="5">T7</label>
+                <label><input type="checkbox" value="6">CN</label>
+              </div>
+              <button class="btn sm primary" type="button" id="btnHen">Thêm lịch</button>
+            </div>
+            <p class="hint" style="margin:4px 0">Đến giờ tool tự gửi nội dung + ảnh ở mục 2 vào các nhóm (Zalo phải đang kết nối, không có đợt gửi khác).</p>
+            <ul class="hen-list" id="henList"></ul>
+          </details>
           <div class="confirm hidden" id="confirmBox">
             <div id="confirmText"></div>
             <div class="row">

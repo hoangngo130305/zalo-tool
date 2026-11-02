@@ -1,0 +1,79 @@
+{% load static %}<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Đội của tôi – Zalo Tool</title>
+<link rel="stylesheet" href="{% static 'guitin/app.css' %}">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="logo">Z</span>Zalo Tool</div>
+    <a class="btn sm link" href="{% url 'trang-chu' %}">‹ Gửi tin</a>
+    <div class="spacer"></div>
+    <div class="me">
+      <span>{{ me.name }}</span><span class="role {{ me.role }}">{{ me.roleLabel }}</span>
+      <form class="inline" method="post" action="{% url 'dang-xuat' %}">{% csrf_token %}<button class="btn sm link" type="submit">Thoát</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="card">
+    <div class="card-h"><h2>Đội {{ me.doi|default:"(chưa đặt tên đội)" }}</h2><span class="saved" id="saved"></span></div>
+    <div class="card-b">
+      {% if not me.doi %}<div class="locked-note">Tài khoản của bạn chưa có tên đội. Nhờ quản trị đặt “Đội” cho bạn và các nhân viên trong đội (trang quản trị → Tài khoản).</div>{% endif %}
+      <p class="hint" style="margin:0">Quản trị giao số cho bạn, bạn chia lại cho nhân viên trong đội. Số đã giao thì nhân viên không xoá được.</p>
+    </div>
+    <div class="table-wrap" style="max-height:none">
+      <table><thead><tr><th>Thành viên</th><th class="n">Được giao</th><th class="n">Chờ gửi</th><th class="n">Đã gửi</th><th class="n">Lỗi / từ chối</th></tr></thead><tbody id="tvBody"></tbody></table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-h"><h2>Số của đội</h2></div>
+    <div class="card-b">
+      <div class="toolbar">
+        <select id="locNguoi" aria-label="Lọc theo thành viên"><option value="">Tất cả thành viên</option></select>
+        <select id="locTt" aria-label="Lọc theo trạng thái">
+          <option value="">Mọi trạng thái</option><option value="cho">Chờ gửi</option><option value="ok">Đã gửi</option><option value="loi">Lỗi</option><option value="tu_choi">Khách từ chối</option>
+        </select>
+        <input type="search" class="search" id="tim" placeholder="Tìm SĐT, tên...">
+        <div class="spacer"></div>
+        <span class="hint" id="soChon">Đã chọn 0</span>
+        <select id="giaoCho" aria-label="Giao cho"><option value="">Giao các số đã chọn cho...</option></select>
+        <button class="btn sm primary" id="btnGiao">Giao</button>
+        <button class="btn sm" id="btnChia">Chia đều số chưa gửi của tôi cho đội</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:36px"><input type="checkbox" id="chonHet" aria-label="Chọn tất cả"></th><th>SĐT</th><th>Họ tên</th><th>Dự án</th><th>Chiến dịch</th><th>Phụ trách</th><th>Trạng thái</th></tr></thead>
+        <tbody id="body"></tbody>
+      </table>
+      <div class="empty hidden" id="empty">Không có số nào.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-h"><h2>Báo cáo của đội</h2></div>
+    <div class="card-b">
+      <form class="filters" id="bcForm">
+        <label>Từ ngày<input type="date" id="bcTu"></label>
+        <label>Đến ngày<input type="date" id="bcDen"></label>
+        <button class="btn sm primary" type="submit">Xem</button>
+      </form>
+      <div class="sum" id="bcTong"></div>
+      <div id="bcChart" class="chart"></div>
+    </div>
+    <div class="table-wrap" style="max-height:none">
+      <table><thead><tr><th>Nhân viên</th><th class="n">Đã gửi</th><th class="n">Thành công</th><th class="n">Đồng ý kết bạn</th><th class="n">Trả lời</th></tr></thead><tbody id="bcNv"></tbody></table>
+    </div>
+  </section>
+</main>
+{{ me|json_script:"me-data" }}
+<script src="{% static 'guitin/chung.js' %}"></script>
+<script src="{% static 'guitin/doi.js' %}"></script>
+</body>
+</html>

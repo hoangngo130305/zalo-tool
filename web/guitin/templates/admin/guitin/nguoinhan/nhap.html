@@ -15,6 +15,51 @@
       {% csrf_token %}
       <div class="card-body">
         {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors|join:" " }}</div>{% endif %}
+
+        {% if xem_truoc %}
+        <!-- Bước 2: xem trước, chọn cột, rồi mới nhập -->
+        <input type="hidden" name="ma_tam" value="{{ ma_tam }}">
+        {% for field in form %}{% if field.name != "tep" and field.name != "dan" %}<input type="hidden" name="{{ field.html_name }}" value="{{ field.value|default:'' }}">{% endif %}{% endfor %}
+        <h5 class="mb-3">Bước 2: kiểm tra trước khi nhập</h5>
+        <div class="row text-center mb-3">
+          <div class="col"><div class="border rounded p-2"><div class="small text-muted">Số dòng</div><b>{{ xem_truoc.tong }}</b></div></div>
+          <div class="col"><div class="border rounded p-2"><div class="small text-muted">SĐT hợp lệ</div><b>{{ xem_truoc.hopLe }}</b></div></div>
+          <div class="col"><div class="border rounded p-2 {% if xem_truoc.sai %}border-danger{% endif %}"><div class="small text-muted">Số sai</div><b>{{ xem_truoc.sai }}</b></div></div>
+          <div class="col"><div class="border rounded p-2"><div class="small text-muted">Trùng trong file</div><b>{{ xem_truoc.trungTrongFile }}</b></div></div>
+        </div>
+        <div class="row text-center mb-3">
+          <div class="col"><div class="border rounded p-2 {% if xem_truoc.daCo %}border-warning{% endif %}"><div class="small text-muted">Đã có trong danh sách</div><b>{{ xem_truoc.daCo }}</b></div></div>
+          <div class="col"><div class="border rounded p-2 {% if xem_truoc.tuChoi %}border-warning{% endif %}"><div class="small text-muted">Khách từ chối</div><b>{{ xem_truoc.tuChoi }}</b></div></div>
+          <div class="col"><div class="border rounded p-2"><div class="small text-muted">Đã từng gửi</div><b>{{ xem_truoc.daTungGui }}</b></div></div>
+          <div class="col"><div class="border rounded p-2 border-success"><div class="small text-muted">Sẽ thêm</div><b class="text-success">{{ xem_truoc.seThem }}</b></div></div>
+        </div>
+        {% if xem_truoc.daCoCuaAi %}
+        <p class="small mb-2">Số đã có thuộc: {% for ten, n in xem_truoc.daCoCuaAi.items %}<span class="badge badge-light border">{{ ten }}: {{ n }}</span> {% endfor %}(sẽ bỏ qua, không thêm trùng).</p>
+        {% endif %}
+        {% if tieu_de %}
+        <p class="mb-1"><b>Chọn cột</b> <small class="text-muted">(tool đã tự đoán; sửa nếu chưa đúng rồi bấm “Xem lại”)</small></p>
+        <div class="form-row">
+          {% for k, ten, chon in ghep %}
+          <div class="col-md-4 mb-2"><label class="small mb-0">{{ ten }}</label>
+            <select name="cot_{{ k }}" class="form-control form-control-sm">
+              <option value="">(không có)</option>
+              {% for td in tieu_de %}<option value="{{ forloop.counter0 }}" {% if chon == forloop.counter0 %}selected{% endif %}>{{ td|default:"(cột trống)" }}</option>{% endfor %}
+            </select></div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if mau %}
+        <p class="mb-1 mt-2"><b>Vài dòng đầu</b></p>
+        <div class="table-responsive"><table class="table table-sm table-bordered small mb-0">
+          <thead><tr><th>SĐT</th><th>Họ tên</th><th>Xưng hô</th><th>Dự án</th><th>Nội dung</th><th>Cột thêm</th></tr></thead>
+          <tbody>{% for r in mau %}<tr><td>{{ r.sdt }}</td><td>{{ r.ten }}</td><td>{{ r.xungHo }}</td><td>{{ r.duAn }}</td><td>{{ r.noiDung|truncatechars:60 }}</td>
+            <td>{% for k, v in r.them.items %}<span class="text-muted">{% templatetag openbrace %}{{ k }}{% templatetag closebrace %}</span>={{ v|truncatechars:20 }} {% endfor %}</td></tr>{% endfor %}</tbody>
+        </table></div>
+        <small class="text-muted">Các “cột thêm” dùng được trong nội dung, vd <code>{% templatetag openbrace %}canho{% templatetag closebrace %}</code>.</small>
+        {% endif %}
+
+        {% else %}
+        <!-- Bước 1: chọn file -->
         {% for field in form %}
         <div class="form-group">
           <label for="{{ field.id_for_label }}"><b>{{ field.label }}</b></label>
@@ -23,9 +68,9 @@
           {% elif field.name == "dan" %}
             <textarea name="dan" id="{{ field.id_for_label }}" rows="8" class="form-control" style="font-family:Consolas,monospace"
                       placeholder="0901234567, Anh Nam, Chào anh Nam, bên em có ưu đãi...&#10;0912345678	Chị Lan	Chào chị Lan...">{{ field.value|default:"" }}</textarea>
-          {% elif field.name == "du_an" %}
-            <input type="text" name="du_an" id="{{ field.id_for_label }}" value="{{ field.value|default:"" }}" maxlength="100"
-                   class="form-control" style="max-width:360px" placeholder="VD: Palm City">
+          {% elif field.name == "du_an" or field.name == "nguon" %}
+            <input type="text" name="{{ field.name }}" id="{{ field.id_for_label }}" value="{{ field.value|default:"" }}" maxlength="{% if field.name == 'du_an' %}100{% else %}255{% endif %}"
+                   class="form-control" style="max-width:420px" placeholder="{% if field.name == 'du_an' %}VD: Palm City{% else %}VD: Khách đăng ký sự kiện mở bán 10/2026{% endif %}">
           {% else %}
             <select name="{{ field.html_name }}" id="{{ field.id_for_label }}" class="form-control" style="max-width:360px">
               {% for value, label in field.field.choices %}
@@ -37,10 +82,17 @@
           {% for e in field.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
         </div>
         {% endfor %}
+        {% endif %}
       </div>
       <div class="card-footer">
-        <button type="submit" class="btn btn-primary"><i class="fas fa-file-import"></i> Nhập</button>
-        <a href="{% url 'admin:guitin_nguoinhan_changelist' %}" class="btn btn-outline-secondary">Huỷ</a>
+        {% if xem_truoc %}
+          <button type="submit" name="buoc" value="nhap" class="btn btn-primary" {% if not xem_truoc.seThem %}disabled{% endif %}><i class="fas fa-file-import"></i> Nhập {{ xem_truoc.seThem }} số</button>
+          {% if tieu_de %}<button type="submit" name="buoc" value="xem_lai" class="btn btn-outline-primary">Xem lại theo cột đã chọn</button>{% endif %}
+          <a href="{% url 'admin:guitin_nguoinhan_nhap' %}" class="btn btn-outline-secondary">Chọn file khác</a>
+        {% else %}
+          <button type="submit" name="buoc" value="xem_truoc" class="btn btn-primary"><i class="fas fa-search"></i> Xem trước</button>
+          <a href="{% url 'admin:guitin_nguoinhan_changelist' %}" class="btn btn-outline-secondary">Huỷ</a>
+        {% endif %}
       </div>
     </form>
   </div>
@@ -49,14 +101,14 @@
       <div class="card-header"><h3 class="card-title">Lưu ý</h3></div>
       <div class="card-body small">
         <ul class="pl-3 mb-0">
-          <li>Nhận file <b>.xlsx</b>, <b>.xls</b> (Excel 97-2003) và <b>.csv</b>. Dòng tên cột không cần nằm ở dòng đầu.</li>
+          <li>Nhận file <b>.xlsx</b>, <b>.xls</b> (Excel 97-2003) và <b>.csv</b>. Dòng tên cột không cần nằm ở dòng đầu. Tool tự nhận cột; không nhận được thì chọn cột thủ công ở bước xem trước.</li>
           <li>Số dạng 84…, +84… hoặc bị mất số 0 đầu đều được tự sửa. Số 11 chữ số đầu cũ (0162…, 0120…) được đổi sang đầu số mới.</li>
           <li>Ô ghi nhiều số (090… - 091…) thì lấy số đầu tiên.</li>
-          <li>Số đã có trong danh sách sẽ được bỏ qua, không thêm trùng.</li>
-          <li>Cột <b>Nội dung</b> là tin nhắn riêng cho từng người, dùng được <b>{ten}</b>. Dòng nào để trống thì gửi nội dung mặc định trong “Cài đặt gửi tin”.</li>
+          <li>Số đã có trong danh sách (cùng chiến dịch) và số khách đã từ chối liên hệ được bỏ qua.</li>
+          <li>Cột <b>Nội dung</b> là tin nhắn riêng cho từng người, dùng được <b>{ten}</b>, <b>{xungho}</b> (cột Xưng hô) và các cột khác trong file. Để trống thì gửi nội dung của chiến dịch / mặc định.</li>
+          <li><b>Nguồn danh sách</b>: ghi rõ danh sách lấy từ đâu để biết nguồn gốc dữ liệu (quy định bảo vệ dữ liệu cá nhân).</li>
           <li>Chọn “Chưa giao” nếu muốn chia sau: vào Người nhận, chọn các dòng, rồi chọn thao tác “Giao … cho …” hoặc “Chia đều”.</li>
-          <li><b>Dự án</b> được ghi vào tên gợi nhớ khi kết bạn (vd “Anh Nam 0901234567 Palm City”). File có cột <b>Dự án</b> thì dòng đó dùng dự án của mình.</li>
-          <li>Nhân viên chỉ thấy và chỉ gửi các số được giao cho mình.</li>
+          <li><b>Dự án</b> được ghi vào tên gợi nhớ khi kết bạn (vd “Anh Nam 0901234567 Palm City”).</li>
         </ul>
       </div>
     </div>

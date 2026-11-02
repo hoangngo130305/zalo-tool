@@ -1,9 +1,14 @@
 // Trang của nhân viên: nhập danh sách (SĐT, họ tên, nội dung), gửi tự động, xem lịch sử & xuất Excel.
 const $ = (id) => document.getElementById(id);
 const me = JSON.parse($("me-data").textContent);
-let contacts = [];        // [{ id, sdt, ten, noiDung, duAn, khoa, tuChoi }] các số của mình (id trống = dòng mới)
-let doneMap = {};         // sdtChuan -> kết quả mới nhất
+let contacts = [];        // [{ id, sdt, ten, noiDung, duAn, chienDich, khoa, tuChoi, khach }] số của mình (id trống = dòng mới)
+let doneMap = {};         // id dòng -> kết quả gửi lần đầu
 let config = {};
+let chienDichList = [];   // chiến dịch đang chạy [{ id, ten, duAn, noiDung, loiMoi }]
+let trangThaiKhach = [];  // [{ id, ten }] trạng thái chăm sóc khách
+let mauList = [];         // mẫu tin nhắn đã duyệt [{ id, ten, loai, noiDung }]
+let lichHen = [];
+let dot = null;           // đợt gửi gần nhất của tôi
 let myDefault = "";       // tin nhắn mặc định của tôi (để trống = dùng nội dung của quản trị)
 let myInvite = "";        // lời mời kết bạn của tôi (để trống = dùng lời mời của quản trị)
 let myImages = [];        // ảnh gửi kèm tin nhắn của tôi (trống = dùng ảnh của quản trị)
@@ -15,7 +20,7 @@ let hanMuc = null;        // { daGui, toiDa, tamDungDen } hạn mức hôm nay c
 
 // ---------- tiện ích ----------
 // normalizePhone, cacMau, fill, thanhCong, docDongDan: dùng chung với server (chung.js)
-const { normalizePhone, cacMau, fill, thanhCong, docDongDan } = window.Chung;
+const { normalizePhone, cacMau, fill, thanhCong, docDongDan, canhBao } = window.Chung;
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const csrfToken = () => document.cookie.split("; ").find((c) => c.startsWith("csrftoken="))?.split("=")[1] || "";
 const now = () => new Date().toLocaleTimeString("vi-VN");
@@ -40,15 +45,19 @@ async function api(path, body, opts = {}) {
 // Nội dung tin nhắn thực tế sẽ gửi cho 1 người:
 // nội dung riêng của dòng -> tin nhắn của tôi -> nội dung của quản trị
 const baseMsg = () => myDefault || config.noiDungTinNhan || "";
-const msgFor = (c) => fill(c.noiDung || baseMsg(), c.ten, c.duAn || config.tenDuAn, me.name);
+const cdCua = (c) => chienDichList.find((x) => x.id === c.chienDich);
+const msgFor = (c) => fill(c.noiDung || cdCua(c)?.noiDung || baseMsg(), c.ten, c.duAn || cdCua(c)?.duAn || config.tenDuAn,
+  me.name, { xungho: c.xungHo || "", ...(c.them || {}) });
 
 // ---------- trạng thái từng số ----------
+// Kết quả gửi theo từng dòng (id): cùng một số có thể nằm ở nhiều chiến dịch, mỗi chiến dịch một kết quả
+const ketQuaCua = (c) => (c.id ? doneMap[c.id] : null);
 function statusOf(c) {
   const p = normalizePhone(c.sdt);
   if (!String(c.sdt).trim()) return { cls: "warn", text: "Thiếu số" };
   if (!p) return { cls: "bad", text: "Số sai" };
   if (st.current === p) return { cls: "run", text: "Đang gửi" };
-  const r = doneMap[p];
+  const r = ketQuaCua(c);
   if (r) {
     if (!thanhCong(r.ketBan, r.tinNhan)) return { cls: "bad", text: "Lỗi", note: r.ghiChu };
     return { cls: "ok", text: "Đã gửi", note: [r.tenZalo && `Zalo: ${r.tenZalo}`, r.thoiGian].filter(Boolean).join(" · ") };
@@ -62,20 +71,61 @@ function pendingList() {
   const seen = new Set();
   return contacts.filter((c) => {
     const p = normalizePhone(c.sdt);
-    if (!p || doneMap[p] || c.tuChoi || seen.has(p)) return false;
+    if (!p || ketQuaCua(c) || c.tuChoi || seen.has(p)) return false;
+    if (c.chienDich && !cdCua(c)) return false;          // chiến dịch đã dừng / hết hạn
     if (config.guiTinNhan && !msgFor(c)) return false;
     seen.add(p);
     return true;
   });
 }
 
-// ---------- bảng ----------
+// ---------- bảng: tìm, lọc, phân trang (trên 500 số thì chia trang 200 số) ----------
+const TRANG = 200;
+let trangBang = 1;
+function hopLoc(c) {
+  const q = $("cSearch").value.trim().toLowerCase();
+  if (q && !`${c.sdt} ${c.ten} ${c.duAn} ${c.chienDichTen || ""}`.toLowerCase().includes(q)) return false;
+  const loc = $("cLoc").value;
+  const s = statusOf(c);
+  if (loc === "cho") return s.cls === "todo";
+  if (loc === "loi") return s.cls === "bad" || s.cls === "warn";
+  if (loc === "tra_loi") return !!c.khach?.traLoi;
+  if (loc === "dong_y") return !!c.khach?.dongY;
+  return true;
+}
+const TRANG_THAI_KHACH = () => trangThaiKhach.map((t) => `<option value="${t.id}">${esc(t.ten)}</option>`).join("");
+function oKhach(c) {
+  if (!c.id || !normalizePhone(c.sdt)) return "";
+  const k = c.khach || {};
+  const huy = [k.dongY && `<span class="pill ok" title="Đồng ý kết bạn lúc ${esc(k.dongY)}">✓</span>`,
+    k.traLoi && `<span class="pill run" title="Khách nhắn lại lúc ${esc(k.traLoi)}${k.soLanTraLoi > 1 ? ` (${k.soLanTraLoi} lần)` : ""}">💬</span>`]
+    .filter(Boolean).join("");
+  return `${huy}<select class="khach" data-khach="${esc(normalizePhone(c.sdt))}" aria-label="Trạng thái khách">${TRANG_THAI_KHACH()
+    .replace(`value="${k.trangThai || "moi"}"`, `value="${k.trangThai || "moi"}" selected`)}</select>`;
+}
+function oChienDich(c, locked) {
+  if (c.khoa || ketQuaCua(c) || locked) return `<span class="note">${esc(c.chienDichTen || (c.chienDich ? "?" : "Chung"))}</span>`;
+  const opts = [`<option value="">Chung</option>`, ...chienDichList.map((x) => `<option value="${x.id}" ${x.id === c.chienDich ? "selected" : ""}>${esc(x.ten)}</option>`)];
+  if (c.chienDich && !cdCua(c)) opts.push(`<option value="${c.chienDich}" selected>${esc(c.chienDichTen || "?")} (đã dừng)</option>`);
+  return `<select class="cd" aria-label="Chiến dịch">${opts.join("")}</select>`;
+}
+
 function renderTable() {
   const locked = !!st.running;
   const ph = baseMsg() ? "(để trống: dùng tin nhắn gửi hàng loạt)" : "Nhập nội dung tin nhắn...";
-  $("tbody").innerHTML = contacts.map((c, i) => {
+  const hien = contacts.map((c, i) => i).filter((i) => hopLoc(contacts[i]));
+  const chiaTrang = hien.length > 500;
+  const soTrang = chiaTrang ? Math.ceil(hien.length / TRANG) : 1;
+  trangBang = Math.min(Math.max(1, trangBang), soTrang);
+  const trang = chiaTrang ? hien.slice((trangBang - 1) * TRANG, trangBang * TRANG) : hien;
+  $("cPager").classList.toggle("hidden", !chiaTrang);
+  $("cPage").textContent = `Trang ${trangBang}/${soTrang} (${hien.length} số)`;
+  $("cPrev").disabled = trangBang <= 1;
+  $("cNext").disabled = trangBang >= soTrang;
+  $("tbody").innerHTML = trang.map((i) => {
+    const c = contacts[i];
     const p = normalizePhone(c.sdt);
-    const done = !!doneMap[p];
+    const done = !!ketQuaCua(c);
     // Số quản trị giao: không đổi SĐT, không xoá được (chỉ sửa tên, nội dung, dự án)
     const khoa = c.khoa ? ' title="Số quản trị giao: không đổi SĐT hay xoá được"' : "";
     const nutTuChoi = p && !c.tuChoi
@@ -86,15 +136,21 @@ function renderTable() {
       <td class="idx"${khoa}>${i + 1}${c.khoa ? " 🔒" : ""}</td>
       <td><input class="phone" id="sdt-${i}" value="${esc(c.sdt)}" placeholder="0901234567" aria-label="Số điện thoại dòng ${i + 1}" ${locked || c.khoa ? "disabled" : ""}${khoa}></td>
       <td><input class="name" value="${esc(c.ten)}" placeholder="Họ tên" aria-label="Họ tên dòng ${i + 1}" ${locked ? "disabled" : ""}></td>
-      <td><input class="duan" value="${esc(c.duAn)}" placeholder="${esc(config.tenDuAn || "Dự án")}" aria-label="Dự án dòng ${i + 1}" ${locked ? "disabled" : ""}></td>
+      <td><input class="duan" value="${esc(c.duAn)}" placeholder="${esc(cdCua(c)?.duAn || config.tenDuAn || "Dự án")}" aria-label="Dự án dòng ${i + 1}" ${locked ? "disabled" : ""}></td>
+      <td>${oChienDich(c, locked)}</td>
       <td><textarea class="msg" rows="1" placeholder="${esc(ph)}" aria-label="Nội dung tin nhắn dòng ${i + 1}" ${locked || done ? "disabled" : ""}>${esc(c.noiDung)}</textarea></td>
       <td class="status">${statusCell(statusOf(c))}</td>
-      <td class="act">${done && !c.tuChoi ? `<button class="btn sm link" data-reset="${p}" ${locked ? "disabled" : ""}>Gửi lại</button>` : ""}${nutTuChoi}${nutXoa}</td>
+      <td class="khach-o">${oKhach(c)}</td>
+      <td class="act">${done && !c.tuChoi ? `<button class="btn sm link" data-reset="${p}" data-id="${c.id}" ${locked ? "disabled" : ""}>Gửi lại</button>` : ""}${nutTuChoi}${nutXoa}</td>
     </tr>`;
   }).join("");
   $("emptyList").classList.toggle("hidden", contacts.length > 0);
   renderStats();
 }
+$("cSearch").addEventListener("input", debounce(() => { trangBang = 1; renderTable(); }, 250));
+$("cLoc").onchange = () => { trangBang = 1; renderTable(); };
+$("cPrev").onclick = () => { trangBang--; renderTable(); };
+$("cNext").onclick = () => { trangBang++; renderTable(); };
 function refreshStatuses() {
   document.querySelectorAll("#tbody tr").forEach((tr) => {
     const c = contacts[tr.dataset.i];
@@ -122,10 +178,13 @@ function renderStats() {
 // ---------- lưu danh sách ----------
 function setDoneFrom(view) {
   doneMap = {};
-  for (const c of view) if (c.sdtChuan && c.ketQua) doneMap[c.sdtChuan] = c.ketQua;
+  for (const c of view) if (c.ketQua) doneMap[c.id] = c.ketQua;
+  const khach = Object.fromEntries(view.filter((c) => c.khach).map((c) => [c.id, c.khach]));
+  for (const c of contacts) if (c.id) c.khach = khach[c.id] || null;
 }
 const toLocal = (view) => view.map((c) => ({ id: c.id, sdt: c.sdt, ten: c.ten, noiDung: c.noiDung || "", duAn: c.duAn || "",
-  khoa: !!c.khoa, tuChoi: !!c.tuChoi }));
+  khoa: !!c.khoa, tuChoi: !!c.tuChoi, chienDich: c.chienDich || null, chienDichTen: c.chienDichTen || "",
+  xungHo: c.xungHo || "", them: c.them || {}, khach: c.khach || null }));
 // Server chỉ lưu phần thay đổi: dòng mới (chưa có id) nhận id sau khi lưu, ghép theo SĐT và thứ tự.
 // Dòng nào gõ tiếp trong lúc đang lưu thì không ghép được: lần lưu sau server tự thay dòng cũ.
 function ganId(view) {
@@ -173,6 +232,9 @@ async function reloadContacts() {
     if (!inviteDirty && r.loiMoiCuaToi !== undefined) { myInvite = r.loiMoiCuaToi; if (document.activeElement !== $("myInvite")) $("myInvite").value = myInvite; }
     if (r.anhCuaToi && !imgBusy && seq === imgSeq) { myImages = r.anhCuaToi; renderMyImages(); }
     const focused = document.activeElement?.closest?.("#tbody");
+    napThem(r);
+    renderHen();
+    renderDot();
     contacts = toLocal(r.contacts);
     setDoneFrom(r.contacts);
     if (focused) refreshStatuses(); else renderTable();
@@ -184,13 +246,27 @@ $("tbody").addEventListener("input", (e) => {
   const tr = e.target.closest("tr");
   if (!tr) return;
   const c = contacts[tr.dataset.i];
+  if (e.target.classList.contains("khach")) return;      // trạng thái khách lưu riêng (sự kiện change bên dưới)
   if (e.target.classList.contains("phone")) c.sdt = e.target.value;
   else if (e.target.classList.contains("msg")) c.noiDung = e.target.value;
   else if (e.target.classList.contains("duan")) c.duAn = e.target.value;
-  else c.ten = e.target.value;
+  else if (e.target.classList.contains("cd")) {
+    c.chienDich = Number(e.target.value) || null;
+    c.chienDichTen = cdCua(c)?.ten || "";
+  } else c.ten = e.target.value;
   tr.querySelector(".status").innerHTML = statusCell(statusOf(c));
   renderStats();
   queueSave();
+});
+// Nhân viên chọn trạng thái chăm sóc khách (CRM): Quan tâm, Hẹn xem nhà...
+$("tbody").addEventListener("change", async (e) => {
+  if (!e.target.classList.contains("khach")) return;
+  try {
+    const r = await api("/api/khach", { sdt: e.target.dataset.khach, trangThai: e.target.value });
+    version = r.version;
+    for (const c of contacts) if (normalizePhone(c.sdt) === e.target.dataset.khach) c.khach = r.khach;
+    flash("listSaved", "Đã lưu trạng thái khách");
+  } catch (err) { showError(err); }
 });
 $("tbody").addEventListener("click", async (e) => {
   const { del, reset, tuchoi } = e.target.dataset;
@@ -212,17 +288,23 @@ $("tbody").addEventListener("click", async (e) => {
     } catch (err) { showError(err); }
   } else if (reset) {
     try {
-      const r = await api("/api/reset", { sdt: reset });
+      const r = await api("/api/reset", { sdt: reset, id: Number(e.target.dataset.id) || null });
       version = r.version;
       setDoneFrom(r.contacts);
       renderTable();
     } catch (err) { showError(err); }
   }
 });
+const cdMoi = () => Number($("cdAll").value) || null;     // chiến dịch cho số mới thêm
+const dongMoi = (o) => ({ sdt: "", ten: "", noiDung: "", duAn: $("duAnAll").value.trim(), chienDich: cdMoi(),
+  chienDichTen: chienDichList.find((x) => x.id === cdMoi())?.ten || "", xungHo: "", them: {}, ...o });
 $("btnAddRow").onclick = () => {
-  contacts.push({ sdt: "", ten: "", noiDung: "", duAn: $("duAnAll").value.trim() });
+  contacts.push(dongMoi());
+  $("cSearch").value = "";
+  $("cLoc").value = "";
+  trangBang = 1e9;      // trang cuối (renderTable tự giới hạn)
   renderTable();
-  $(`sdt-${contacts.length - 1}`).focus();
+  $(`sdt-${contacts.length - 1}`)?.focus();
 };
 let clearArmed = false;
 $("btnClearList").onclick = () => {
@@ -241,17 +323,20 @@ $("btnClearList").onclick = () => {
   if (giu.length) info(`Đã xoá các số bạn tự thêm. Giữ lại ${giu.length} số quản trị giao.`, "warn");
 };
 function addMany(rows) {
-  const have = new Set(contacts.map((c) => normalizePhone(c.sdt) || c.sdt));
+  // Trùng tính theo cặp (SĐT, chiến dịch): cùng khách được nằm ở chiến dịch khác
+  const khoa = (sdt, cd) => `${normalizePhone(sdt) || String(sdt).trim()}|${cd || ""}`;
+  const have = new Set(contacts.map((c) => khoa(c.sdt, c.chienDich)));
   let added = 0, skipped = 0, coNoiDung = 0;
   for (const r of rows) {
-    const key = normalizePhone(r.sdt) || String(r.sdt).trim();
-    if (!key) continue;
+    if (!String(r.sdt || "").trim()) continue;
+    const key = khoa(r.sdt, cdMoi());
     if (have.has(key)) { skipped++; continue; }
     have.add(key);
     const noiDung = String(r.noiDung || "").trim();
     if (noiDung) coNoiDung++;
-    contacts.push({ sdt: String(r.sdt).trim(), ten: String(r.ten || "").trim(), noiDung,
-      duAn: String(r.duAn || "").trim() || $("duAnAll").value.trim() });
+    contacts.push(dongMoi({ sdt: String(r.sdt).trim(), ten: String(r.ten || "").trim(), noiDung,
+      duAn: String(r.duAn || "").trim() || $("duAnAll").value.trim(), xungHo: String(r.xungHo || "").trim(),
+      them: r.them || {} }));
     added++;
   }
   renderTable();
@@ -264,7 +349,7 @@ $("btnDuAnAll").onclick = () => {
   const duAn = $("duAnAll").value.trim();
   if (!duAn) return showError(new Error("Nhập tên dự án vào ô Dự án trước."));
   let n = 0;
-  for (const c of contacts) if (!String(c.duAn || "").trim() && !doneMap[normalizePhone(c.sdt)]) { c.duAn = duAn; n++; }
+  for (const c of contacts) if (!String(c.duAn || "").trim() && !ketQuaCua(c)) { c.duAn = duAn; n++; }
   renderTable();
   if (n) queueSave();
   info(n ? `Đã gán dự án “${duAn}” cho ${n} số.` : "Không còn số nào chưa có dự án.", n ? "ok" : "info");
@@ -318,7 +403,122 @@ function renderPreview() {
   $("myInviteCount").classList.toggle("over", dai);
   $("btnUseAdminInvite").classList.toggle("hidden", !myInvite);
   $("pvInvite").textContent = config.guiKetBan ? fill(mauLoiMoi[0] || "", ten) : "(không gửi lời mời kết bạn)";
+  // Cảnh báo tin quá dài / có từ dễ bị coi là spam (không chặn gửi)
+  const canh = (id, cb) => {
+    $(id).classList.toggle("hidden", !cb.length);
+    $(id).innerHTML = cb.map((x) => `⚠ ${esc(x)}`).join("<br>");
+  };
+  canh("myMsgWarn", canhBao(myDefault, "tin_nhan", config.tuSpam));
+  canh("myInviteWarn", canhBao(myInvite, "loi_moi", config.tuSpam));
 }
+
+// Dữ liệu phụ từ server: chiến dịch, mẫu tin, lịch hẹn, trạng thái khách, đợt gửi gần nhất, quyền xuất Excel
+function napThem(s) {
+  if (s.chienDich) {
+    chienDichList = s.chienDich;
+    const chon = $("cdAll").value;
+    $("cdAll").innerHTML = `<option value="">Chung (không thuộc chiến dịch)</option>`
+      + chienDichList.map((c) => `<option value="${c.id}">${esc(c.ten)}</option>`).join("");
+    $("cdAll").value = chienDichList.some((c) => String(c.id) === chon) ? chon : "";
+    $("cdBar").querySelector("label").classList.toggle("hidden", !chienDichList.length);
+    $("cdAll").classList.toggle("hidden", !chienDichList.length);
+  }
+  if (s.trangThaiKhach) trangThaiKhach = s.trangThaiKhach;
+  if (s.mau) { mauList = s.mau; renderMau(); }
+  if (s.lichHen) lichHen = s.lichHen;
+  if ("dot" in s) dot = s.dot;
+  if ("xuatExcel" in s) for (const id of ["hExcel", "hExcelOk"]) $(id).classList.toggle("hidden", !s.xuatExcel);
+}
+
+// ---------- thư viện mẫu tin nhắn (quản trị duyệt) ----------
+function renderMau() {
+  for (const [id, loai] of [["mauMsg", "tin_nhan"], ["mauInvite", "loi_moi"]]) {
+    const ds = mauList.filter((m) => m.loai === loai);
+    $(id).classList.toggle("hidden", !ds.length);
+    $(id).innerHTML = `<option value="">Chọn mẫu có sẵn...</option>` + ds.map((m) => `<option value="${m.id}">${esc(m.ten)}</option>`).join("");
+  }
+}
+for (const [sel, o] of [["mauMsg", "myMsg"], ["mauInvite", "myInvite"]]) {
+  $(sel).onchange = () => {
+    const m = mauList.find((x) => x.id === Number($(sel).value));
+    $(sel).value = "";
+    if (!m) return;
+    const t = $(o);
+    if (t.value.trim() && !confirm("Thay nội dung đang soạn bằng mẫu này?")) return;
+    t.value = m.noiDung;
+    t.dispatchEvent(new Event("input"));
+  };
+}
+
+// ---------- tiếp tục đợt bị gián đoạn ----------
+function renderDot() {
+  const coTheTiep = dot && ["gian_doan", "da_dung", "tu_dung"].includes(dot.trangThai) && dot.conLai > 0 && !st.running;
+  $("resumeBox").classList.toggle("hidden", !coTheTiep);
+  if (coTheTiep) {
+    $("resumeText").innerHTML = `Đợt gửi lúc ${esc(dot.batDau)} <b>${esc(dot.trangThaiTen.toLowerCase())}</b> sau ${dot.daGui}/${dot.tong} người. `
+      + `Còn <b>${dot.conLai}</b> số chưa gửi.`;
+  }
+}
+$("btnResume").onclick = async () => {
+  try {
+    const r = await api("/api/dot/tiep-tuc", { dot: dot.id });
+    dot = r.dot;
+    renderDot();
+  } catch (e) { showError(e); }
+};
+
+// ---------- hẹn giờ gửi ----------
+function renderHen() {
+  const lap = $("henLap").value;
+  $("henLucBox").classList.toggle("hidden", lap !== "mot_lan");
+  $("henGioBox").classList.toggle("hidden", lap === "mot_lan");
+  $("henThuBox").classList.toggle("hidden", lap !== "hang_tuan");
+  const bat = lichHen.filter((x) => x.dangBat).length;
+  $("henCount").textContent = bat ? `${bat} lịch đang bật` : "";
+  $("henList").innerHTML = lichHen.map((x) => `<li class="${x.dangBat ? "" : "tat"}">
+      <span><b>${esc(x.moTa)}</b>${x.dangBat && x.lanToi ? ` · lần tới ${esc(x.lanToi)}` : ""}${x.ketQuaCuoi ? `<br><span class="note">Lần cuối ${esc(x.lanCuoi || "")}: ${esc(x.ketQuaCuoi)}</span>` : ""}</span>
+      <span><button class="btn sm link" data-hen-bat="${x.id}" data-bat="${x.dangBat ? "" : "1"}">${x.dangBat ? "Tắt" : "Bật"}</button>
+      <button class="btn sm link" data-hen-xoa="${x.id}">Xoá</button></span></li>`).join("") || `<li class="note">Chưa có lịch hẹn.</li>`;
+}
+$("henLap").onchange = renderHen;
+$("btnHen").onclick = async () => {
+  const b = { loai: "ca_nhan", lap: $("henLap").value, luc: $("henLuc").value, gio: $("henGio").value,
+    thu: [...document.querySelectorAll("#henThuBox input:checked")].map((x) => Number(x.value)) };
+  if (b.lap === "mot_lan" && !b.luc) return showError(new Error("Chọn ngày giờ gửi."));
+  try {
+    lichHen = (await api("/api/lich-hen", b)).lichHen;
+    renderHen();
+    info("Đã thêm lịch hẹn gửi.");
+  } catch (e) { showError(e); }
+};
+$("henList").onclick = async (e) => {
+  const { henBat, henXoa, bat } = e.target.dataset;
+  if (!henBat && !henXoa) return;
+  if (henXoa && !confirm("Xoá lịch hẹn này?")) return;
+  try {
+    lichHen = (await api("/api/lich-hen", henXoa ? { loai: "ca_nhan", xoa: henXoa } : { loai: "ca_nhan", bat: henBat, dangBat: !!bat })).lichHen;
+    renderHen();
+  } catch (err) { showError(err); }
+};
+
+// ---------- báo cáo ----------
+const { veBieuDo } = window.Chung;
+async function loadBaoCao() {
+  try {
+    const q = new URLSearchParams({ tu: $("bcTu").value, den: $("bcDen").value });
+    const r = await api(`/api/bao-cao?${q}`);
+    $("bcTu").value = r.tu;
+    $("bcDen").value = r.den;
+    const t = r.tong;
+    const pt = (a, b) => (b ? ` (${Math.round((a / b) * 100)}%)` : "");
+    $("bcTong").innerHTML = `<span>Đã gửi: <b>${t.gui}</b></span><span style="color:var(--ok)">Thành công: <b>${t.thanhCong}</b>${pt(t.thanhCong, t.gui)}</span>`
+      + `<span>Đồng ý kết bạn: <b>${t.dongY}</b></span><span>Trả lời: <b>${t.traLoi}</b></span>`;
+    veBieuDo($("bcChart"), r.theoNgay);
+    $("bcCd").innerHTML = r.chienDich.map((c) => `<tr><td>${esc(c.ten)}${c.dangChay ? "" : ' <span class="note">(đã dừng)</span>'}</td><td>${c.tong}</td><td>${c.gui}</td><td>${c.thanhCong}</td><td>${c.dongY}</td><td>${c.traLoi}</td></tr>`).join("")
+      || `<tr><td colspan="6" class="note">Chưa có chiến dịch.</td></tr>`;
+  } catch (e) { showError(e); }
+}
+$("bcForm").onsubmit = (e) => { e.preventDefault(); loadBaoCao(); };
 const saveMyMsg = debounce(async () => {
   try {
     const r = await api("/api/tin-nhan-cua-toi", { noiDung: $("myMsg").value });
@@ -567,16 +767,18 @@ function addLog(e) {
 
 // ---------- tab ----------
 function showTab(name) {
-  const lichSu = name === "lichsu";
-  $("tabGui").setAttribute("aria-selected", String(!lichSu));
-  $("tabLichSu").setAttribute("aria-selected", String(lichSu));
-  $("panelGui").classList.toggle("hidden", lichSu);
-  $("panelLichSu").classList.toggle("hidden", !lichSu);
-  if (lichSu) loadHistory();
-  try { history.replaceState(null, "", lichSu ? "#lichsu" : "#"); } catch {}
+  const tab = { gui: ["tabGui", "panelGui"], lichsu: ["tabLichSu", "panelLichSu"], baocao: ["tabBaoCao", "panelBaoCao"] };
+  for (const [k, [t, p]] of Object.entries(tab)) {
+    $(t).setAttribute("aria-selected", String(k === name));
+    $(p).classList.toggle("hidden", k !== name);
+  }
+  if (name === "lichsu") loadHistory();
+  if (name === "baocao") loadBaoCao();
+  try { history.replaceState(null, "", name === "gui" ? "#" : `#${name}`); } catch {}
 }
 $("tabGui").onclick = () => showTab("gui");
 $("tabLichSu").onclick = () => showTab("lichsu");
+$("tabBaoCao").onclick = () => showTab("baocao");
 
 // ---------- lịch sử gửi ----------
 let hPage = 1;
@@ -630,6 +832,7 @@ async function poll() {
     $("connAlert").classList.add("hidden");
     st = r;
     if (r.hanMuc) hanMuc = r.hanMuc;
+    if ("dot" in r) { dot = r.dot; renderDot(); }
     renderState();
     r.logs.forEach(addLog);
     if (version !== null && r.version !== version) reloadContacts();
@@ -649,6 +852,7 @@ async function poll() {
     $("myInvite").value = myInvite;
     myImages = s.anhCuaToi || [];
     renderMyImages();
+    napThem(s);
     contacts = toLocal(s.contacts);
     setDoneFrom(s.contacts);
     st = s;
@@ -657,10 +861,13 @@ async function poll() {
     s.logs.forEach(addLog);
     renderTable();
     renderState();
+    renderHen();
+    renderDot();
   } catch (e) {
     $("connAlert").classList.remove("hidden");
     showError(e);
   }
   if (location.hash === "#lichsu") showTab("lichsu");
+  if (location.hash === "#baocao") showTab("baocao");
   poll();
 })();

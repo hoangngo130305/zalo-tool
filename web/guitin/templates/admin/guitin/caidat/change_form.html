@@ -1,0 +1,24 @@
+{% extends "admin/change_form.html" %}
+{% block extra_actions %}
+{{ block.super }}
+<div class="form-group">
+  <button type="button" class="btn btn-outline-info form-control" id="ztGuiThu"
+          data-url="{% url 'admin:guitin_caidat_gui_thu' %}"><i class="fas fa-envelope"></i> Gửi thử báo cáo ngay</button>
+  <small class="text-muted d-block mt-1" id="ztGuiThuKq">Lưu cài đặt trước rồi bấm để gửi file Excel báo cáo tới các email nhận.</small>
+</div>
+<script>
+document.getElementById("ztGuiThu").addEventListener("click", async (e) => {
+  const b = e.currentTarget, kq = document.getElementById("ztGuiThuKq");
+  const csrf = document.cookie.split("; ").find((c) => c.startsWith("csrftoken="))?.split("=")[1] || "";
+  b.disabled = true;
+  kq.textContent = "Đang gửi...";
+  try {
+    const r = await fetch(b.dataset.url, { method: "POST", headers: { "X-CSRFToken": csrf } });
+    const d = await r.json();
+    kq.textContent = d.ok || d.error;
+    kq.className = "d-block mt-1 " + (r.ok ? "text-success" : "text-danger");
+  } catch (err) { kq.textContent = String(err); kq.className = "d-block mt-1 text-danger"; }
+  b.disabled = false;
+});
+</script>
+{% endblock %}

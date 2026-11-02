@@ -47,6 +47,14 @@ class ViDuChung(TestCase):
             out = sv.doc_van_ban(vao)
             self.assertEqual(out[0] if out else None, ra, vao)
 
+    def test_dien_them(self):
+        for (tpl, ten, them), ra in VD["dien_them"]:
+            self.assertEqual(sv.dien(tpl, ten, "", "", them), ra)
+
+    def test_canh_bao(self):
+        for (text, loai, tu), so in VD["canh_bao"]:
+            self.assertEqual(len(sv.canh_bao_noi_dung(text, loai, tu)), so, text[:30])
+
 
 class DocDuLieu(TestCase):
     def test_tach_sdt(self):
@@ -60,7 +68,7 @@ class DocDuLieu(TestCase):
 
     def test_doc_csv(self):
         rows = sv.doc_file("Danh sách\r\nSĐT;Họ tên;Dự án\r\n901234567;Anh Nam;Palm City\r\n".encode("utf-8"))
-        self.assertEqual(rows, [{"sdt": "0901234567", "ten": "Anh Nam", "noiDung": "", "duAn": "Palm City"}])
+        self.assertEqual(rows, [{"sdt": "0901234567", "ten": "Anh Nam", "noiDung": "", "duAn": "Palm City", "xungHo": "", "them": {}}])
 
     def test_doc_xlsx(self):
         from openpyxl import Workbook
@@ -288,12 +296,47 @@ class TrangQuanTri(CoSo):
                 self.assertEqual(c.get(url).status_code, 200, url)
 
     def test_nhap_danh_sach_qua_admin(self):
+        """2 bước: xem trước (chưa ghi gì) rồi mới nhập; bắt buộc ghi nguồn danh sách."""
         c = self.client_cua(self.admin)
-        r = c.post("/admin/guitin/nguoinhan/nhap/", {"dan": "0901111111\tAnh Nam\t\tPalm City", "phu_trach": self.nv.id,
-                                                     "du_an": ""}, follow=True)
+        KhongLienHe.objects.create(sdt="0902222222")
+        du_lieu = {"dan": "0901111111\tAnh Nam\t\tPalm City\n0902222222\tTừ chối", "phu_trach": self.nv.id, "du_an": "",
+                   "nguon": "Sự kiện 10/2026", "chien_dich": ""}
+        r = c.post("/admin/guitin/nguoinhan/nhap/", {**du_lieu, "buoc": "xem_truoc"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["xem_truoc"]["seThem"], 1)
+        self.assertEqual(r.context["xem_truoc"]["tuChoi"], 1)
+        self.assertFalse(NguoiNhan.objects.exists())
+        r = c.post("/admin/guitin/nguoinhan/nhap/", {**du_lieu, "dan": "", "ma_tam": r.context["ma_tam"], "buoc": "nhap"},
+                   follow=True)
         self.assertEqual(r.status_code, 200)
         n = NguoiNhan.objects.get(sdt="0901111111")
-        self.assertEqual((n.du_an, n.quan_tri_giao), ("Palm City", True))
+        self.assertEqual((n.du_an, n.quan_tri_giao, n.nguon), ("Palm City", True, "Sự kiện 10/2026"))
+        self.assertFalse(NguoiNhan.objects.filter(sdt="0902222222").exists())
+
+    def test_nhap_file_chon_cot_thu_cong(self):
+        """File không có tên cột quen thuộc: tool không tự nhận, quản trị chọn cột ở bước xem trước."""
+        from openpyxl import Workbook
+        wb = Workbook()
+        wb.active.append(["Liên hệ", "Khách", "Căn hộ"])
+        wb.active.append(["901234567", "Anh Nam", "A12"])
+        buf = io.BytesIO()
+        wb.save(buf)
+        with self.assertRaises(ValueError):
+            sv.doc_file(buf.getvalue())
+        rows = sv.doc_file(buf.getvalue(), {"sdt": "0", "ten": "1"})
+        self.assertEqual(rows[0]["sdt"], "0901234567")
+        self.assertEqual(rows[0]["them"], {"canho": "A12"})
+
+    def test_trang_moi_mo_duoc(self):
+        from .models import ChienDich, MauTinNhan
+        ChienDich.objects.create(ten="Palm City T11")
+        MauTinNhan.objects.create(ten="Mẫu 1", noi_dung="Chào {ten}")
+        c = self.client_cua(self.admin)
+        with mock.patch("guitin.worker.tat_ca", return_value={self.nv.id: {**DANG_NHAP, "listening": True}}):
+            for url in ("/admin/guitin/chiendich/", "/admin/guitin/chiendich/add/", "/admin/guitin/khachhang/",
+                        "/admin/guitin/dotgui/", "/admin/guitin/lichhen/", "/admin/guitin/mautinnhan/",
+                        "/admin/guitin/bonhom/", "/admin/tinh-trang/", "/admin/guitin/caidat/1/change/"):
+                self.assertEqual(c.get(url).status_code, 200, url)
 
 
 class KhoaDangNhap(CoSo):

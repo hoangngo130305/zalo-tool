@@ -7,6 +7,10 @@ let groups = null;        // danh sách nhóm đã tải từ Zalo (null = chưa
 let anhToiDa = 10;
 let version = null;
 let lastLogId = 0;
+let boNhom = [];          // bộ nhóm đã lưu [{ id, ten, nhom }]
+let lichHen = [];
+let mauList = [];
+let dangSua = null;       // id nhóm đang soạn nội dung riêng
 
 // ---------- tiện ích ----------
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -40,11 +44,19 @@ function renderGroups() {
   const all = groups ?? cauHinh.nhom.map((g) => ({ ...g, soThanhVien: null }));
   const shown = all.filter((g) => !q || g.ten.toLowerCase().includes(q));
   const locked = !!st.running;
-  $("groupBody").innerHTML = shown.map((g) => `<tr class="${sel.has(g.id) ? "current" : ""}">
+  const rieng = new Map(cauHinh.nhom.map((g) => [g.id, g.noiDung || ""]));
+  $("groupBody").innerHTML = shown.map((g) => {
+    const nd = rieng.get(g.id) || "";
+    const oRieng = !sel.has(g.id) ? "" : dangSua === g.id
+      ? `<textarea class="msg" data-rieng="${esc(g.id)}" rows="3" placeholder="Để trống: dùng nội dung chung" ${locked ? "disabled" : ""}>${esc(nd)}</textarea>`
+      : `<button class="btn sm link" data-sua="${esc(g.id)}" ${locked ? "disabled" : ""} title="Soạn nội dung riêng cho nhóm này">✎</button><span class="note">${esc(nd ? nd.slice(0, 40) + (nd.length > 40 ? "…" : "") : "(dùng nội dung chung)")}</span>`;
+    return `<tr class="${sel.has(g.id) ? "current" : ""}">
     <td><input type="checkbox" data-id="${esc(g.id)}" id="g-${esc(g.id)}" ${sel.has(g.id) ? "checked" : ""} ${locked ? "disabled" : ""}></td>
     <td><label for="g-${esc(g.id)}" style="cursor:pointer">${esc(g.ten)}</label></td>
     <td class="n">${g.soThanhVien ?? ""}</td>
-  </tr>`).join("");
+    <td>${oRieng}</td>
+  </tr>`;
+  }).join("");
   $("groupEmpty").classList.toggle("hidden", shown.length > 0);
   $("groupEmpty").textContent = all.length ? "Không có nhóm nào khớp từ khoá." : groups ? "Tài khoản Zalo này chưa tham gia nhóm nào." : "Chưa chọn nhóm nào. Bấm “Tải danh sách nhóm”.";
   $("groupHint").innerHTML = groups
@@ -62,8 +74,9 @@ const saveGroups = debounce(async () => {
 }, 500);
 function setSelected(ids, on) {
   const byId = new Map((groups ?? cauHinh.nhom).map((g) => [g.id, g]));
+  const cu = new Map(cauHinh.nhom.map((g) => [g.id, g]));
   let nhom = cauHinh.nhom.filter((g) => !ids.includes(g.id));
-  if (on) nhom = nhom.concat(ids.map((id) => ({ id, ten: byId.get(id)?.ten || id })));
+  if (on) nhom = nhom.concat(ids.map((id) => ({ id, ten: byId.get(id)?.ten || id, ...(cu.get(id)?.noiDung ? { noiDung: cu.get(id).noiDung } : {}) })));
   cauHinh.nhom = nhom;
   renderGroups();
   saveGroups();
@@ -71,6 +84,97 @@ function setSelected(ids, on) {
 $("groupBody").addEventListener("change", (e) => {
   if (e.target.dataset.id) setSelected([e.target.dataset.id], e.target.checked);
 });
+// Nội dung riêng cho từng nhóm
+$("groupBody").addEventListener("click", (e) => {
+  if (!e.target.dataset.sua) return;
+  dangSua = e.target.dataset.sua;
+  renderGroups();
+  document.querySelector(`[data-rieng="${CSS.escape(dangSua)}"]`)?.focus();
+});
+$("groupBody").addEventListener("input", (e) => {
+  const id = e.target.dataset.rieng;
+  if (!id) return;
+  const g = cauHinh.nhom.find((x) => x.id === id);
+  if (!g) return;
+  if (e.target.value.trim()) g.noiDung = e.target.value; else delete g.noiDung;
+  saveGroups();
+});
+$("groupBody").addEventListener("focusout", (e) => {
+  if (e.target.dataset.rieng) { dangSua = null; setTimeout(renderGroups, 0); }
+});
+
+// ---------- bộ nhóm lưu sẵn ----------
+function renderBoNhom() {
+  const chon = $("boNhomSel").value;
+  const opts = boNhom.map((b) => `<option value="${b.id}">${esc(b.ten)} (${b.nhom.length} nhóm)</option>`).join("");
+  $("boNhomSel").innerHTML = `<option value="">Chọn bộ nhóm đã lưu...</option>${opts}`;
+  $("boNhomSel").value = boNhom.some((b) => String(b.id) === chon) ? chon : "";
+  $("btnXoaBo").classList.toggle("hidden", !$("boNhomSel").value);
+  $("henBo").innerHTML = `<option value="">Các nhóm đang chọn</option>${opts}`;
+}
+$("boNhomSel").onchange = () => {
+  const b = boNhom.find((x) => String(x.id) === $("boNhomSel").value);
+  $("btnXoaBo").classList.toggle("hidden", !b);
+  if (!b) return;
+  cauHinh.nhom = b.nhom.map((g) => ({ ...g }));
+  renderGroups();
+  saveGroups();
+  info(`Đã chọn bộ nhóm “${b.ten}” (${b.nhom.length} nhóm).`, "info");
+};
+$("btnLuuBo").onclick = async () => {
+  if (!cauHinh.nhom.length) return showError(new Error("Chưa chọn nhóm nào."));
+  const cu = boNhom.find((x) => String(x.id) === $("boNhomSel").value);
+  const ten = prompt("Tên bộ nhóm (trùng tên thì ghi đè):", cu?.ten || "");
+  if (!ten?.trim()) return;
+  try {
+    boNhom = (await api("/api/nhom/bo-nhom", { ten: ten.trim(), nhom: cauHinh.nhom })).boNhom;
+    renderBoNhom();
+    $("boNhomSel").value = String(boNhom.find((x) => x.ten === ten.trim())?.id || "");
+    info(`Đã lưu bộ nhóm “${ten.trim()}”.`);
+  } catch (e) { showError(e); }
+};
+$("btnXoaBo").onclick = async () => {
+  const b = boNhom.find((x) => String(x.id) === $("boNhomSel").value);
+  if (!b || !confirm(`Xoá bộ nhóm “${b.ten}”?`)) return;
+  try {
+    boNhom = (await api("/api/nhom/bo-nhom", { xoa: b.id })).boNhom;
+    renderBoNhom();
+  } catch (e) { showError(e); }
+};
+
+// ---------- hẹn giờ gửi nhóm ----------
+function renderHen() {
+  const lap = $("henLap").value;
+  $("henLucBox").classList.toggle("hidden", lap !== "mot_lan");
+  $("henGioBox").classList.toggle("hidden", lap === "mot_lan");
+  $("henThuBox").classList.toggle("hidden", lap !== "hang_tuan");
+  const bat = lichHen.filter((x) => x.dangBat).length;
+  $("henCount").textContent = bat ? `${bat} lịch đang bật` : "";
+  $("henList").innerHTML = lichHen.map((x) => `<li class="${x.dangBat ? "" : "tat"}">
+      <span><b>${esc(x.moTa)}</b> · ${esc(x.boNhom ? `bộ “${x.boNhom}”` : "các nhóm đang chọn")}${x.dangBat && x.lanToi ? ` · lần tới ${esc(x.lanToi)}` : ""}${x.ketQuaCuoi ? `<br><span class="note">Lần cuối ${esc(x.lanCuoi || "")}: ${esc(x.ketQuaCuoi)}</span>` : ""}</span>
+      <span><button class="btn sm link" data-hen-bat="${x.id}" data-bat="${x.dangBat ? "" : "1"}">${x.dangBat ? "Tắt" : "Bật"}</button>
+      <button class="btn sm link" data-hen-xoa="${x.id}">Xoá</button></span></li>`).join("") || `<li class="note">Chưa có lịch hẹn.</li>`;
+}
+$("henLap").onchange = renderHen;
+$("btnHen").onclick = async () => {
+  const b = { loai: "nhom", lap: $("henLap").value, luc: $("henLuc").value, gio: $("henGio").value, boNhom: $("henBo").value || null,
+    thu: [...document.querySelectorAll("#henThuBox input:checked")].map((x) => Number(x.value)) };
+  if (b.lap === "mot_lan" && !b.luc) return showError(new Error("Chọn ngày giờ gửi."));
+  try {
+    lichHen = (await api("/api/lich-hen", b)).lichHen;
+    renderHen();
+    info("Đã thêm lịch gửi nhóm.");
+  } catch (e) { showError(e); }
+};
+$("henList").onclick = async (e) => {
+  const { henBat, henXoa, bat } = e.target.dataset;
+  if (!henBat && !henXoa) return;
+  if (henXoa && !confirm("Xoá lịch hẹn này?")) return;
+  try {
+    lichHen = (await api("/api/lich-hen", henXoa ? { loai: "nhom", xoa: henXoa } : { loai: "nhom", bat: henBat, dangBat: !!bat })).lichHen;
+    renderHen();
+  } catch (err) { showError(err); }
+};
 const visibleIds = () => [...document.querySelectorAll("#groupBody input[data-id]")].map((x) => x.dataset.id);
 $("btnSelectAll").onclick = () => setSelected(visibleIds(), true);
 $("btnSelectNone").onclick = () => setSelected(visibleIds(), false);
@@ -83,7 +187,7 @@ $("btnLoadGroups").onclick = async () => {
     groups = (await api("/api/nhom/danh-sach")).groups;
     // Cập nhật tên mới nhất cho các nhóm đã chọn
     const byId = new Map(groups.map((g) => [g.id, g]));
-    cauHinh.nhom = cauHinh.nhom.map((g) => ({ id: g.id, ten: byId.get(g.id)?.ten || g.ten }));
+    cauHinh.nhom = cauHinh.nhom.map((g) => ({ ...g, ten: byId.get(g.id)?.ten || g.ten }));
     info(`Đã tải ${groups.length} nhóm.`, "info");
     renderGroups();
   } catch (e) { showError(e); }
@@ -93,6 +197,17 @@ $("btnLoadGroups").onclick = async () => {
 
 // ---------- nội dung & ảnh ----------
 const { cacMau } = window.Chung;   // dùng chung với trang nhân viên và server (chung.js)
+function renderMauNhom() {
+  $("mauMsg").classList.toggle("hidden", !mauList.length);
+  $("mauMsg").innerHTML = `<option value="">Chọn mẫu có sẵn...</option>` + mauList.map((m) => `<option value="${m.id}">${esc(m.ten)}</option>`).join("");
+}
+$("mauMsg").onchange = () => {
+  const m = mauList.find((x) => x.id === Number($("mauMsg").value));
+  $("mauMsg").value = "";
+  if (!m || ($("msg").value.trim() && !confirm("Thay nội dung đang soạn bằng mẫu này?"))) return;
+  $("msg").value = m.noiDung;
+  $("msg").dispatchEvent(new Event("input"));
+};
 function renderMsg() {
   const n = $("msg").value.length;
   const soMau = cacMau($("msg").value).length;
@@ -278,12 +393,18 @@ async function poll() {
   try {
     const s = await api("/api/nhom/state");
     st = s;
-    config = s.config;
+    config = s.cfgNhom || s.config;     // thời gian chờ riêng của gửi nhóm (nếu quản trị đặt)
     cauHinh = s.cauHinh;
     anhToiDa = s.anhToiDa;
     version = s.version;
+    boNhom = s.boNhom || [];
+    lichHen = s.lichHen || [];
+    mauList = s.mau || [];
     $("msg").value = cauHinh.noiDung;
     s.logs.forEach(addLog);
+    renderBoNhom();
+    renderHen();
+    renderMauNhom();
     renderGroups();
     renderMsg();
     renderState();

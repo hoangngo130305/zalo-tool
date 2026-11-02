@@ -17,11 +17,12 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from . import cham_soc as cs
 from . import services as sv
 from . import worker
 from .auth import con_bi_khoa
-from .models import (CaiDat, CauHinhNhom, KetQua, KhongLienHe, LichSuGui, LichSuGuiNhom, NguoiDung, NguoiNhan, NhatKy,
-                     chuan_hoa_sdt, q_thanh_cong)
+from .models import (BoNhom, CaiDat, CauHinhNhom, DotGui, KetQua, KhachHang, KhongLienHe, LichHen, LichSuGui,
+                     LichSuGuiNhom, MauTinNhan, NguoiDung, NguoiNhan, NhatKy, chuan_hoa_sdt, q_thanh_cong)
 
 
 # ---------- trang ----------
@@ -62,7 +63,7 @@ def trang_chu(request):
     if u.is_staff:
         return redirect("admin:index")
     me = {"id": u.id, "name": str(u), "email": u.email, "role": u.vai_tro, "roleLabel": u.get_vai_tro_display(),
-          "perms": sorted(u.quyen)}
+          "perms": sorted(u.quyen), "doi": u.doi}
     return render(request, "guitin/nhan_vien.html", {"me": me})
 
 
@@ -120,9 +121,30 @@ def nhat_ky_cho(user):
     return qs if user.co_quyen("all") else qs.filter(nguoi_dung=user)
 
 
+def dot_gan_nhat(user):
+    """Đợt gửi từng người gần nhất của user (để hiện nút “Tiếp tục đợt bị gián đoạn”)."""
+    d = DotGui.objects.filter(nguoi_gui=user, loai=DotGui.CA_NHAN).order_by("-id").first()
+    return cs.dot_dict(d) if d else None
+
+
+def thong_tin_them(user):
+    """Dữ liệu phụ cho trang gửi tin: chiến dịch đang chạy, mẫu tin đã duyệt, lịch hẹn, trạng thái khách."""
+    return {
+        "chienDich": [{"id": c.id, "ten": c.ten, "duAn": c.du_an, "noiDung": c.noi_dung, "loiMoi": c.loi_moi}
+                      for c in sv.chien_dich_dang_chay()],
+        "mau": [{"id": m.id, "ten": m.ten, "loai": m.loai, "noiDung": m.noi_dung}
+                for m in MauTinNhan.objects.filter(da_duyet=True)],
+        "lichHen": [cs.lich_hen_dict(lh) for lh in user.lich_hen.filter(loai=LichHen.CA_NHAN).order_by("-dang_bat", "-tao_luc")[:30]],
+        "trangThaiKhach": [{"id": k, "ten": v} for k, v in KhachHang.TRANG_THAI],
+        "dot": dot_gan_nhat(user),
+        "xuatExcel": user.co_quyen("export"),
+    }
+
+
 # ---------- API ----------
 @api("view", ["GET"])
 def api_state(request):
+    cs.kiem_tra_dot_cua(request.user)
     logs = list(nhat_ky_cho(request.user).order_by("-id")[:300])
     return {
         **trang_thai_cho(request.user),
@@ -134,6 +156,7 @@ def api_state(request):
         "staff": staff_cho(request.user),
         "logs": [sv.log_dict(n) for n in reversed(logs)],
         "hanMuc": han_muc_cho(request.user),
+        **thong_tin_them(request.user),
         "version": sv.phien_ban(request.user),
     }
 
@@ -145,9 +168,12 @@ def api_poll(request):
         sau = int(request.GET.get("log") or 0)
     except ValueError:
         sau = 0
+    st = trang_thai_cho(request.user)
+    if not st.get("running") and st.get("worker"):
+        cs.kiem_tra_dot_cua(request.user)
     logs = nhat_ky_cho(request.user).filter(id__gt=sau).order_by("id")[:200]
-    return {**trang_thai_cho(request.user), "logs": [sv.log_dict(n) for n in logs], "hanMuc": han_muc_cho(request.user),
-            "version": sv.phien_ban(request.user)}
+    return {**st, "logs": [sv.log_dict(n) for n in logs], "hanMuc": han_muc_cho(request.user),
+            "dot": dot_gan_nhat(request.user), "version": sv.phien_ban(request.user)}
 
 
 @api("all", ["GET"])
@@ -172,7 +198,59 @@ def api_contacts(request):
         ket_qua_luu = sv.luu_danh_sach(request.user, rows)
     return {"contacts": sv.danh_sach(request.user), "luu": ket_qua_luu, "staff": staff_cho(request.user), "config": CaiDat.lay().to_dict(),
             "tinNhanCuaToi": request.user.tin_nhan_mac_dinh, "loiMoiCuaToi": request.user.loi_moi_ket_ban,
-            "anhCuaToi": request.user.anh_tin_nhan, "version": sv.phien_ban(request.user)}
+            "anhCuaToi": request.user.anh_tin_nhan, **thong_tin_them(request.user), "version": sv.phien_ban(request.user)}
+
+
+@api("list", ["POST"])
+def api_khach(request):
+    """Nhân viên đổi trạng thái chăm sóc / ghi chú của khách (CRM): chỉ khách trong danh sách của mình."""
+    u = request.user
+    sdt = chuan_hoa_sdt(request.json.get("sdt"))
+    if not sdt:
+        raise ValueError("Số điện thoại không hợp lệ")
+    if not u.co_quyen("all") and not u.nguoi_nhan.filter(sdt=sdt).exists():
+        raise ValueError("Số này không thuộc danh sách của bạn")
+    kh, _ = KhachHang.objects.get_or_create(sdt=sdt, defaults={"nhan_vien": u})
+    if "trangThai" in request.json:
+        tt = request.json.get("trangThai")
+        if tt not in dict(KhachHang.TRANG_THAI):
+            raise ValueError("Trạng thái không hợp lệ")
+        kh.trang_thai = tt
+    if "ghiChu" in request.json:
+        kh.ghi_chu = str(request.json.get("ghiChu") or "").strip()[:2000]
+    kh.save()
+    sv.tang_phien_ban([u.id, kh.nhan_vien_id])
+    return {"khach": sv.khach_dict(kh), "version": sv.phien_ban(u)}
+
+
+@api("send", ["GET", "POST"])
+def api_lich_hen(request):
+    """Hẹn giờ gửi (một lần / hằng ngày / hằng tuần). POST {xoa: id} để xoá, {bat: id, dangBat} để bật / tắt."""
+    u = request.user
+    loai = request.GET.get("loai") or request.json.get("loai") or LichHen.CA_NHAN
+    if request.method == "POST":
+        b = request.json
+        if b.get("xoa"):
+            u.lich_hen.filter(id=int(b["xoa"])).delete()
+            sv.ghi_log(f"{u} đã xoá một lịch hẹn gửi.", nguoi_dung=u)
+        elif b.get("bat"):
+            u.lich_hen.filter(id=int(b["bat"])).update(dang_bat=bool(b.get("dangBat")))
+        else:
+            cs.tao_lich_hen(u, b)
+    return {"lichHen": [cs.lich_hen_dict(lh) for lh in u.lich_hen.filter(loai=loai).select_related("bo_nhom")
+                        .order_by("-dang_bat", "-tao_luc")[:30]]}
+
+
+@api("send", ["POST"])
+def api_dot_tiep_tuc(request):
+    """Tiếp tục đợt gửi bị gián đoạn / đã dừng: gửi các số còn lại của đợt đó (số đã gửi tự bỏ qua)."""
+    u = request.user
+    d = DotGui.objects.filter(nguoi_gui=u, id=int(request.json.get("dot") or 0), loai=DotGui.CA_NHAN).first()
+    if not d:
+        raise ValueError("Không tìm thấy đợt gửi")
+    dot = cs.bat_dau_gui(u, chi_sdt=d.danh_sach, ghi_chu=f"Tiếp tục đợt #{d.id}")
+    sv.ghi_log(f"{u} tiếp tục đợt gửi #{d.id}: còn {dot.tong} số.", "ok", u)
+    return {"ok": True, "dot": cs.dot_dict(dot)}
 
 
 @api("send", ["POST"])
@@ -268,7 +346,9 @@ def api_preview(request):
     for r in items:
         loi_moi, tin = sv.dien(sv.loi_moi_gui(r, cfg), r.ten), sv.noi_dung_gui(r, cfg)
         out.append({
-            "sdt": r.sdt, "ten": r.ten,
+            "sdt": r.sdt, "ten": r.ten, "chienDich": r.chien_dich.ten if r.chien_dich_id else "",
+            "canhBao": (sv.canh_bao_noi_dung(tin, "tin_nhan", cfg.cac_tu_spam()) if cfg.gui_tin_nhan else [])
+            + (sv.canh_bao_noi_dung(loi_moi, "loi_moi", cfg.cac_tu_spam()) if cfg.gui_ket_ban else []),
             "loiMoi": sv.xao(loi_moi) if cfg.gui_ket_ban else None, "soMauLoiMoi": len(sv.cac_mau(loi_moi)),
             "tenGoiNho": sv.ten_goi_nho(cfg.mau_ten_goi_nho, r.ten, r.sdt, sv.du_an_cua(r, cfg)) if cfg.doi_ten_goi_nho else None,
             "tinNhan": sv.xao(tin) if cfg.gui_tin_nhan else None, "soMauTinNhan": len(sv.cac_mau(tin)),
@@ -292,7 +372,13 @@ def api_reset(request):
         phone = chuan_hoa_sdt(sdt)
         if not u.co_quyen("all") and not u.nguoi_nhan.filter(sdt=phone).exists():
             raise ValueError("Số này không thuộc danh sách của bạn")
-        KetQua.objects.filter(sdt=phone).delete()
+        dong = NguoiNhan.objects.filter(id=int(request.json.get("id") or 0), sdt=phone).first()
+        if dong and dong.chien_dich_id:
+            # Số trong chiến dịch: chỉ tính kết quả gửi sau lúc này (lịch sử cũ vẫn giữ)
+            dong.gui_lai_tu = timezone.now()
+            dong.save(update_fields=["gui_lai_tu"])
+        else:
+            KetQua.objects.filter(sdt=phone).delete()
         sv.ghi_log(f"{u} đánh dấu {phone} để gửi lại.", "warn", u)
     sv.tang_phien_ban()
     return {"contacts": sv.danh_sach(u), "version": sv.phien_ban(request.user)}
@@ -349,30 +435,8 @@ def api_zalo_tat_ca(request):
 @api("send", ["POST"])
 def api_start(request):
     """Gửi bằng Zalo của chính người bấm gửi."""
-    u = request.user
-    if worker.trang_thai(u.id).get("login") != "in":
-        raise ValueError("Bạn chưa kết nối Zalo. Quét QR để kết nối Zalo của bạn trước khi gửi")
-    cfg = CaiDat.lay()
-    if not cfg.gui_ket_ban and not cfg.gui_tin_nhan:
-        raise ValueError("Đang tắt cả kết bạn lẫn tin nhắn, hãy bật ít nhất một mục")
-    chan = sv.chua_gui_duoc(u, cfg)
-    if chan:
-        raise ValueError(chan)
-    batch = sv.cho_gui(u, request.json.get("phamVi"), sv.so_gui_toi_da(u, cfg))
-    if not batch:
-        raise ValueError("Không còn ai cần gửi trong phạm vi này")
-    worker.goi("POST", "/run", {
-        "uid": u.id,
-        # Gửi kèm nội dung đã điền sẵn cho từng người (nội dung riêng hoặc mặc định)
-        "batch": [{"sdt": r.sdt, "ten": r.ten, "noiDung": sv.noi_dung_gui(r, cfg), "duAn": sv.du_an_cua(r, cfg),
-                   "loiMoi": sv.loi_moi_gui(r, cfg), "nhanVien": sv.nhan_vien_cua(r)} for r in batch],
-        # Ảnh gửi kèm: ảnh riêng của người bấm gửi, chưa có thì ảnh của quản trị.
-        # conLaiHomNay: worker tự dừng khi đủ hạn mức hôm nay (lớp chặn thứ hai, cả khi đợt gửi kéo qua nửa đêm)
-        "cfg": {**cfg.to_dict(), "anh": sv.anh_gui_kem(u, cfg), "conLaiHomNay": sv.con_lai_hom_nay(u, cfg),
-                "hanMucNgay": sv.han_muc_ngay(u, cfg)},
-        "runBy": {"id": u.id, "name": str(u)},
-    })
-    return {"ok": True}
+    dot = cs.bat_dau_gui(request.user, request.json.get("phamVi"))
+    return {"ok": True, "dot": cs.dot_dict(dot)}
 
 
 @api("send", ["POST"])
@@ -385,7 +449,7 @@ def api_stop(request):
     return {"ok": True}
 
 
-@api("view", ["GET"])
+@api("export", ["GET"])
 def api_report(request):
     """Báo cáo Excel. Nhân viên chỉ tải được kết quả các số của mình."""
     from openpyxl import Workbook
@@ -470,7 +534,7 @@ def api_lich_su(request):
             "trang": trang, "soTrang": max(1, (tong + co - 1) // co)}
 
 
-@api("view", ["GET"])
+@api("export", ["GET"])
 def api_lich_su_excel(request):
     """Xuất Excel đúng theo bộ lọc đang chọn."""
     loc = _bo_loc(request)
@@ -506,43 +570,20 @@ def api_worker_event(request):
         NhatKy.objects.create(noi_dung=str(b.get("text", ""))[:5000], muc=b.get("level") or "info",
                               nguoi_dung=NguoiDung.objects.filter(id=b.get("nguoiDungId")).first())
     elif b.get("type") == "result":
-        sdt = chuan_hoa_sdt(b.get("sdt"))
-        r = b.get("ketQua") or {}
-        if sdt:
-            try:
-                tg = datetime.fromisoformat(str(r.get("thoiGian")).replace("Z", "+00:00"))
-            except ValueError:
-                tg = timezone.now()
-            du_lieu = {
-                "ten": str(r.get("ten") or "")[:255], "ten_zalo": str(r.get("tenZalo") or "")[:255],
-                "ket_ban": str(r.get("ketBan") or "-")[:20], "tin_nhan": str(r.get("tinNhan") or "-")[:20],
-                "noi_dung": str(r.get("noiDung") or ""), "ghi_chu": str(r.get("ghiChu") or ""), "thoi_gian": tg,
-                "tai_khoan_zalo": str(r.get("taiKhoanZalo") or "")[:255],
-                "nguoi_gui": NguoiDung.objects.filter(id=b.get("nguoiGuiId")).first(),
-            }
-            # Worker gửi lại kết quả chưa được xác nhận (hàng đợi trên đĩa): mã đã có thì bỏ qua, không ghi 2 lần
-            ma = str(b.get("ma") or "")[:40] or None
-            if not (ma and LichSuGui.objects.filter(ma=ma).exists()):
-                with transaction.atomic():
-                    # Một dòng lịch sử (không ghi đè) + trạng thái mới nhất của số này
-                    LichSuGui.objects.create(sdt=sdt, ma=ma, **du_lieu)
-                    KetQua.objects.update_or_create(sdt=sdt, defaults=du_lieu)
-            phu_trach = NguoiNhan.objects.filter(sdt=sdt).values_list("phu_trach_id", flat=True)
-            sv.tang_phien_ban([b.get("nguoiGuiId"), *phu_trach])
+        # Worker gửi lại kết quả chưa được xác nhận (hàng đợi trên đĩa): mã đã có thì bỏ qua, không ghi 2 lần
+        cs.ghi_ket_qua(b)
     elif b.get("type") == "result_nhom":
-        r = b.get("ketQua") or {}
-        try:
-            tg = datetime.fromisoformat(str(r.get("thoiGian")).replace("Z", "+00:00"))
-        except ValueError:
-            tg = timezone.now()
-        LichSuGuiNhom.objects.create(
-            nhom_id=str(b.get("nhomId") or "")[:64], ten_nhom=str(r.get("tenNhom") or "")[:255],
-            ket_qua=str(r.get("ketQua") or "-")[:20], noi_dung=str(r.get("noiDung") or ""),
-            so_anh=max(0, int(r.get("soAnh") or 0)), ghi_chu=str(r.get("ghiChu") or ""), thoi_gian=tg,
-            tai_khoan_zalo=str(r.get("taiKhoanZalo") or "")[:255],
-            nguoi_gui=NguoiDung.objects.filter(id=b.get("nguoiGuiId")).first(),
-        )
-        sv.tang_phien_ban([b.get("nguoiGuiId")])
+        cs.ghi_ket_qua_nhom(b)
+    elif b.get("type") == "dot_ket_thuc":
+        cs.ket_thuc_dot(b.get("dotId"), b.get("trangThai"), b.get("daGui"))
+    elif b.get("type") == "ket_ban":
+        # Khách đồng ý kết bạn: trả lời worker có cần tự gửi tin cho khách không
+        out = cs.khach_dong_y(b)
+        if out.get("guiTin"):
+            out["guiTin"]["cfg"] = CaiDat.lay().to_dict()
+        return JsonResponse({"ok": True, **out})
+    elif b.get("type") == "tra_loi":
+        cs.khach_tra_loi(b)
     return JsonResponse({"ok": True})
 
 
@@ -559,11 +600,44 @@ def trang_gui_nhom(request):
 
 @api("send", ["GET"])
 def api_nhom_state(request):
-    c = CauHinhNhom.cua(request.user)
-    logs = list(nhat_ky_cho(request.user).filter(nguoi_dung=request.user).order_by("-id")[:200])
-    return {**trang_thai_cho(request.user), "config": CaiDat.lay().to_dict(), "cauHinh": sv.cau_hinh_nhom_dict(c),
-            "anhToiDa": sv.ANH_TOI_DA, "anhToiDaMb": sv.ANH_TOI_DA_MB,
-            "logs": [sv.log_dict(n) for n in reversed(logs)], "version": sv.phien_ban(request.user)}
+    u = request.user
+    c = CauHinhNhom.cua(u)
+    logs = list(nhat_ky_cho(u).filter(nguoi_dung=u).order_by("-id")[:200])
+    return {**trang_thai_cho(u), "config": CaiDat.lay().to_dict(), "cfgNhom": CaiDat.lay().cfg_nhom(),
+            "cauHinh": sv.cau_hinh_nhom_dict(c), "anhToiDa": sv.ANH_TOI_DA, "anhToiDaMb": sv.ANH_TOI_DA_MB,
+            "boNhom": [cs.bo_nhom_dict(x) for x in u.bo_nhom.all()],
+            "lichHen": [cs.lich_hen_dict(lh) for lh in u.lich_hen.filter(loai=LichHen.NHOM).select_related("bo_nhom")
+                        .order_by("-dang_bat", "-tao_luc")[:30]],
+            "mau": [{"id": m.id, "ten": m.ten, "noiDung": m.noi_dung}
+                    for m in MauTinNhan.objects.filter(da_duyet=True, loai=MauTinNhan.NHOM)],
+            "logs": [sv.log_dict(n) for n in reversed(logs)], "version": sv.phien_ban(u)}
+
+
+def _nhom_hop_le(nhom):
+    """Danh sách nhóm từ trang web: [{id, ten, noiDung (nội dung riêng của nhóm, không bắt buộc)}]."""
+    if not isinstance(nhom, list):
+        raise ValueError("Dữ liệu nhóm không hợp lệ")
+    return [{"id": str(g.get("id")), "ten": str(g.get("ten") or "")[:255],
+             **({"noiDung": str(g["noiDung"]).strip()[:5000]} if str(g.get("noiDung") or "").strip() else {})}
+            for g in nhom if isinstance(g, dict) and str(g.get("id") or "").isdigit()][:100]
+
+
+@api("send", ["POST"])
+def api_bo_nhom(request):
+    """Lưu / xoá bộ nhóm: {ten, nhom} để lưu (trùng tên thì ghi đè), {xoa: id} để xoá."""
+    u = request.user
+    b = request.json
+    if b.get("xoa"):
+        u.bo_nhom.filter(id=int(b["xoa"])).delete()
+    else:
+        ten = str(b.get("ten") or "").strip()[:100]
+        if not ten:
+            raise ValueError("Đặt tên cho bộ nhóm")
+        nhom = _nhom_hop_le(b.get("nhom") or [])
+        if not nhom:
+            raise ValueError("Chưa chọn nhóm nào")
+        BoNhom.objects.update_or_create(nguoi=u, ten=ten, defaults={"nhom": nhom})
+    return {"boNhom": [cs.bo_nhom_dict(x) for x in u.bo_nhom.all()]}
 
 
 @api("send", ["GET"])
@@ -581,11 +655,7 @@ def api_nhom_cau_hinh(request):
     if "noiDung" in b:
         c.noi_dung = str(b.get("noiDung") or "").strip()[:5000]
     if "nhom" in b:
-        nhom = b.get("nhom") or []
-        if not isinstance(nhom, list):
-            raise ValueError("Dữ liệu nhóm không hợp lệ")
-        c.nhom = [{"id": str(g.get("id")), "ten": str(g.get("ten") or "")[:255]}
-                  for g in nhom if isinstance(g, dict) and str(g.get("id") or "").isdigit()][:100]
+        c.nhom = _nhom_hop_le(b.get("nhom") or [])
     c.save()
     return {"cauHinh": sv.cau_hinh_nhom_dict(c)}
 
@@ -637,20 +707,8 @@ def xem_anh_nhom(request, ten):
 @api("send", ["POST"])
 def api_nhom_gui(request):
     """Gửi nội dung + ảnh vào các nhóm đã chọn, bằng Zalo của chính người bấm."""
-    u = request.user
-    if worker.trang_thai(u.id).get("login") != "in":
-        raise ValueError("Bạn chưa kết nối Zalo. Quét QR để kết nối Zalo của bạn trước khi gửi")
-    c = CauHinhNhom.cua(u)
-    if not c.nhom:
-        raise ValueError("Chưa chọn nhóm nào để gửi")
-    if not c.noi_dung and not c.anh:
-        raise ValueError("Chưa có nội dung hay ảnh để gửi")
-    worker.goi("POST", "/run-groups", {
-        "uid": u.id, "groups": c.nhom, "noiDung": c.noi_dung,
-        "anh": [f"anh-gui-nhom/{u.id}/{a}" for a in c.anh],
-        "cfg": CaiDat.lay().to_dict(), "runBy": {"id": u.id, "name": str(u)},
-    })
-    return {"ok": True}
+    dot = cs.bat_dau_gui_nhom(request.user)
+    return {"ok": True, "dot": cs.dot_dict(dot)}
 
 
 @api("send", ["GET"])
@@ -660,3 +718,79 @@ def api_nhom_lich_su(request):
     if not request.user.co_quyen("all"):
         qs = qs.filter(nguoi_gui=request.user)
     return {"rows": [sv.lich_su_nhom_dict(h) for h in qs[:100]]}
+
+
+# ---------- báo cáo theo thời gian ----------
+def _khoang_ngay(request, mac_dinh=30):
+    from datetime import date, timedelta
+    try:
+        den = date.fromisoformat(request.GET.get("den")) if request.GET.get("den") else timezone.localdate()
+        tu = date.fromisoformat(request.GET.get("tu")) if request.GET.get("tu") else den - timedelta(days=mac_dinh - 1)
+    except ValueError:
+        raise ValueError("Ngày không hợp lệ") from None
+    if tu > den:
+        tu, den = den, tu
+    if (den - tu).days > 366:
+        raise ValueError("Chọn khoảng tối đa 1 năm")
+    return tu, den
+
+
+@api("view", ["GET"])
+def api_bao_cao(request):
+    """Biểu đồ theo ngày, xếp hạng nhân viên, so sánh dự án / chiến dịch. Nhân viên / trưởng nhóm chỉ thấy của mình / đội."""
+    u = request.user
+    tu, den = _khoang_ngay(request)
+    nguoi = None if u.co_quyen("all") else u.thanh_vien_doi()
+    return {**cs.bao_cao(tu, den, nguoi), "tu": tu.isoformat(), "den": den.isoformat()}
+
+
+# ---------- trưởng nhóm: đội của tôi ----------
+@login_required
+def trang_doi(request):
+    u = request.user
+    if not u.co_quyen("team"):
+        raise PermissionDenied
+    me = {"id": u.id, "name": str(u), "role": u.vai_tro, "roleLabel": u.get_vai_tro_display(), "doi": u.doi}
+    return render(request, "guitin/doi.html", {"me": me})
+
+
+@api("team", ["GET", "POST"])
+def api_doi(request):
+    """Trưởng nhóm xem số của cả đội và giao lại cho thành viên.
+    POST {ids: [...], nguoi: id} giao các số đã chọn; {chiaDeu: true, ids?} chia đều các số chưa gửi cho thành viên."""
+    u = request.user
+    tv = list(u.thanh_vien_doi())
+    tv_ids = {x.id for x in tv}
+    qs = NguoiNhan.objects.filter(phu_trach_id__in=tv_ids)
+    if request.method == "POST":
+        b = request.json
+        ids = [int(i) for i in (b.get("ids") or []) if str(i).isdigit()]
+        if b.get("chiaDeu"):
+            nv = [x for x in tv if x.vai_tro == NguoiDung.NHAN_VIEN]
+            if not nv:
+                raise ValueError("Đội chưa có nhân viên nào")
+            cho = sv.loc_cho_gui(qs.filter(id__in=ids) if ids else qs.filter(phu_trach=u), CaiDat.lay())
+            cho = list(cho.order_by("thu_tu", "id"))
+            for i, r in enumerate(cho):
+                r.phu_trach, r.quan_tri_giao = nv[i % len(nv)], True
+            NguoiNhan.objects.bulk_update(cho, ["phu_trach", "quan_tri_giao"], batch_size=500)
+            sv.ghi_log(f"{u} (trưởng nhóm) đã chia {len(cho)} số cho {len(nv)} nhân viên trong đội.", "ok", u)
+        else:
+            nguoi = int(b.get("nguoi") or 0)
+            if nguoi not in tv_ids:
+                raise ValueError("Chỉ giao được cho thành viên trong đội")
+            n = qs.filter(id__in=ids).update(phu_trach_id=nguoi, quan_tri_giao=True)
+            ten = next(str(x) for x in tv if x.id == nguoi)
+            sv.ghi_log(f"{u} (trưởng nhóm) đã giao {n} số cho {ten}.", "ok", u)
+        sv.tang_phien_ban(tv_ids)
+    rows = list(qs.select_related("phu_trach", "chien_dich")[:3000])
+    kq = sv.ket_qua_cac_dong(rows)
+    tu_choi = set(KhongLienHe.objects.filter(sdt__in=[r.sdt for r in rows if r.sdt]).values_list("sdt", flat=True))
+    return {
+        "thanhVien": [{"id": x.id, "ten": str(x), "vaiTro": x.get_vai_tro_display()} for x in tv],
+        "thongKe": sv.thong_ke(qs)["nhanVien"],
+        "rows": [{"id": r.id, "sdt": r.sdt_goc, "ten": r.ten, "duAn": r.du_an, "phuTrach": r.phu_trach_id,
+                  "chienDich": r.chien_dich.ten if r.chien_dich_id else "",
+                  "trangThai": "tu_choi" if r.sdt in tu_choi else ("so_sai" if not r.sdt else (
+                      ("ok" if kq[r.id].thanh_cong else "loi") if r.id in kq else "cho"))} for r in rows],
+    }

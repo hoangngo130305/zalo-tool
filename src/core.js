@@ -2,7 +2,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Zalo, ThreadType, LoginQRCallbackEventType } from "zca-js";
+import { Zalo, ThreadType, LoginQRCallbackEventType, FriendEventType } from "zca-js";
+
+export { ThreadType, FriendEventType };
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Mỗi tài khoản Zalo Tool có một phiên Zalo riêng: data/zalo-sessions/<id>.json
@@ -222,17 +224,29 @@ export async function loginWithQR(zalo, uid, onEvent, maxRetry = 3) {
 // attachments: ảnh gửi kèm tin nhắn (đọc sẵn 1 lần cho cả đợt)
 // loiZalo = true khi chính Zalo báo lỗi (thường do bị giới hạn tìm số / kết bạn / nhắn tin), dùng để tự dừng đợt gửi.
 // SĐT chưa đăng ký Zalo (Zalo trả mã 216, không báo lỗi) thì không tính.
+// row.kieu: "lan_dau" (mặc định: kết bạn + đổi tên gợi nhớ + nhắn) | "nhac" (nhắc lại) | "khi_dong_y" (khách vừa đồng ý
+// kết bạn): hai kiểu sau chỉ nhắn tin, dùng luôn row.zaloUid nếu có (không tìm số lại).
 export async function processOne(api, row, cfg, attachments = []) {
   const result = { ten: row.ten, ketBan: "-", tinNhan: "-", thoiGian: new Date().toISOString() };
+  const chiNhan = row.kieu === "nhac" || row.kieu === "khi_dong_y";
 
   let user;
-  try {
-    user = await api.findUser(row.sdt);
-  } catch (e) {
-    return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: `Không tìm thấy Zalo: ${e.message}`, loiZalo: true };
+  if (chiNhan && row.zaloUid) {
+    user = { uid: String(row.zaloUid) };
+  } else {
+    try {
+      user = await api.findUser(row.sdt);
+    } catch (e) {
+      return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: `Không tìm thấy Zalo: ${e.message}`, loiZalo: true };
+    }
+    if (!user?.uid) return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: "SĐT chưa đăng ký Zalo hoặc chặn tìm kiếm" };
   }
-  if (!user?.uid) return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: "SĐT chưa đăng ký Zalo hoặc chặn tìm kiếm" };
   result.tenZalo = user.display_name || user.zalo_name;
+  result.zaloUid = String(user.uid);
+  if (chiNhan) {
+    if (row.kieu === "khi_dong_y") result.ketBan = "Đã kết bạn";
+    return guiTin(api, row, cfg, attachments, user, result);
+  }
 
   if (cfg.guiKetBan) {
     try {
@@ -260,28 +274,31 @@ export async function processOne(api, row, cfg, attachments = []) {
     await sleep(1500 + Math.random() * 2000);
   }
 
-  if (cfg.guiTinNhan) {
-    // Nội dung riêng của từng người (Django đã điền sẵn), không có thì dùng nội dung mặc định
-    // Mỗi người nhận ngẫu nhiên 1 mẫu; lưu đúng mẫu đã gửi vào lịch sử
-    const noiDung = spin(row.noiDung ? String(row.noiDung) : fill(cfg.noiDungTinNhan, row));
-    result.noiDung = noiDung + (attachments.length ? `\n[kèm ${attachments.length} ảnh]` : "");
-    try {
-      await api.sendMessage(attachments.length ? { msg: noiDung, attachments } : noiDung, user.uid, ThreadType.User);
-      result.tinNhan = "Đã gửi";
-    } catch (e) {
-      result.tinNhan = "Lỗi";
-      result.ghiChu = [result.ghiChu, `Tin nhắn: ${e.message}`].filter(Boolean).join(" | ");
-      result.loiZalo = true;
-    }
+  if (cfg.guiTinNhan) await guiTin(api, row, cfg, attachments, user, result);
+  return result;
+}
+
+async function guiTin(api, row, cfg, attachments, user, result) {
+  // Nội dung riêng của từng người (Django đã điền sẵn), không có thì dùng nội dung mặc định
+  // Mỗi người nhận ngẫu nhiên 1 mẫu; lưu đúng mẫu đã gửi vào lịch sử
+  const noiDung = spin(row.noiDung ? String(row.noiDung) : fill(cfg.noiDungTinNhan, row));
+  result.noiDung = noiDung + (attachments.length ? `\n[kèm ${attachments.length} ảnh]` : "");
+  try {
+    await api.sendMessage(attachments.length ? { msg: noiDung, attachments } : noiDung, user.uid, ThreadType.User);
+    result.tinNhan = "Đã gửi";
+  } catch (e) {
+    result.tinNhan = "Lỗi";
+    result.ghiChu = [result.ghiChu, `Tin nhắn: ${e.message}`].filter(Boolean).join(" | ");
+    result.loiZalo = true;
   }
   return result;
 }
 
 // ---------- gửi vào 1 nhóm ----------
-// job: { noiDung, attachments } dùng chung cho mọi nhóm trong đợt
+// job: { noiDung, attachments } dùng chung cho mọi nhóm trong đợt; nhóm có noiDung riêng thì dùng nội dung riêng
 export async function processGroup(api, group, job) {
   // Mỗi nhóm nhận ngẫu nhiên 1 mẫu nội dung
-  const noiDung = spin(job.noiDung);
+  const noiDung = spin(group.noiDung || job.noiDung);
   const result = {
     tenNhom: group.ten, ketQua: "-", noiDung, soAnh: job.attachments.length, thoiGian: new Date().toISOString(),
   };

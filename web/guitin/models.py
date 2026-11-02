@@ -121,13 +121,15 @@ class NguoiDungManager(BaseUserManager):
 
 
 class NguoiDung(AbstractUser):
-    QUAN_TRI, NHAN_VIEN, CHI_XEM = "admin", "nhanvien", "xem"
-    VAI_TRO = [(QUAN_TRI, "Quản trị"), (NHAN_VIEN, "Nhân viên"), (CHI_XEM, "Chỉ xem")]
-    # "all" = thấy toàn bộ danh sách; nhân viên thiếu quyền này nên chỉ thấy số được giao cho mình
+    QUAN_TRI, TRUONG_NHOM, NHAN_VIEN, CHI_XEM = "admin", "truongnhom", "nhanvien", "xem"
+    VAI_TRO = [(QUAN_TRI, "Quản trị"), (TRUONG_NHOM, "Trưởng nhóm"), (NHAN_VIEN, "Nhân viên"), (CHI_XEM, "Chỉ xem")]
+    # "all" = thấy toàn bộ danh sách; nhân viên thiếu quyền này nên chỉ thấy số được giao cho mình.
+    # "team" = trưởng nhóm: xem và giao số trong đội của mình (trang Đội của tôi)
     QUYEN = {
-        QUAN_TRI: {"view", "all", "list", "send", "settings", "zalo", "users"},
-        NHAN_VIEN: {"view", "list", "send"},
-        CHI_XEM: {"view", "all"},
+        QUAN_TRI: {"view", "all", "list", "send", "settings", "zalo", "users", "export"},
+        TRUONG_NHOM: {"view", "list", "send", "team", "export"},
+        NHAN_VIEN: {"view", "list", "send", "export"},
+        CHI_XEM: {"view", "all", "export"},
     }
 
     username = None
@@ -154,6 +156,10 @@ class NguoiDung(AbstractUser):
     tam_dung_den = models.DateTimeField(
         "Tạm dừng gửi đến", null=True, blank=True,
         help_text="Tool tự đặt khi gặp nhiều lỗi liên tiếp (có thể Zalo đang hạn chế tài khoản). Xoá ô này để cho gửi lại ngay.")
+    so_dien_thoai = models.CharField("SĐT của nhân viên", max_length=20, blank=True,
+                                     help_text="Dùng cho {sdt_nhanvien} trong tin nhắn / lời mời.")
+    doi = models.CharField("Đội", max_length=100, blank=True, db_index=True,
+                           help_text="Nhân viên cùng tên đội với một Trưởng nhóm thì trưởng nhóm đó xem và giao số được cho họ.")
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["ho_ten"]
@@ -182,10 +188,56 @@ class NguoiDung(AbstractUser):
         return self.QUYEN.get(self.vai_tro, set())
 
     def co_quyen(self, q):
-        return self.is_active and q in self.quyen
+        if not (self.is_active and q in self.quyen):
+            return False
+        # Quản trị tắt "Nhân viên được xuất Excel" thì chỉ quản trị / chỉ xem xuất được
+        if q == "export" and self.vai_tro in (self.NHAN_VIEN, self.TRUONG_NHOM):
+            return CaiDat.lay().nhan_vien_xuat_excel
+        return True
+
+    def thanh_vien_doi(self):
+        """Trưởng nhóm: các tài khoản cùng đội (kể cả chính mình); người khác: chỉ mình."""
+        if self.vai_tro != self.TRUONG_NHOM or not self.doi:
+            return NguoiDung.objects.filter(pk=self.pk)
+        return NguoiDung.objects.filter(is_active=True, doi=self.doi,
+                                        vai_tro__in=[self.NHAN_VIEN, self.TRUONG_NHOM])
 
     def __str__(self):
         return self.ho_ten or self.email
+
+
+# ---------- chiến dịch ----------
+class ChienDich(models.Model):
+    """Một đợt chăm sóc riêng: tên, dự án, nội dung, thời gian. Một khách có thể nằm trong nhiều chiến dịch;
+    số không thuộc chiến dịch nào là “Chung” (như trước đây)."""
+    ten = models.CharField("Tên chiến dịch", max_length=150, unique=True)
+    du_an = models.CharField("Dự án", max_length=100, blank=True, help_text="Dùng cho {duan} khi số chưa có dự án riêng.")
+    loi_moi = models.TextField("Lời mời kết bạn", blank=True, help_text="Để trống: lời mời của nhân viên / quản trị. " + HD_XAO)
+    noi_dung = models.TextField("Tin nhắn", blank=True, help_text="Để trống: tin nhắn của nhân viên / quản trị. " + HD_XAO)
+    tin_khi_dong_y = models.TextField(
+        "Tin gửi khi khách đồng ý kết bạn", blank=True,
+        help_text="Để trống: dùng cài đặt chung (Cài đặt gửi tin → Chăm sóc tự động).")
+    nhac_sau_ngay = models.PositiveSmallIntegerField(
+        "Nhắc lại sau (ngày)", default=0, validators=[MaxValueValidator(90)],
+        help_text="Khách chưa trả lời sau bấy nhiêu ngày thì tự gửi tin nhắc lại một lần. 0 = theo cài đặt chung.")
+    noi_dung_nhac = models.TextField("Tin nhắc lại", blank=True, help_text="Để trống: theo cài đặt chung.")
+    bat_dau = models.DateField("Bắt đầu", null=True, blank=True)
+    ket_thuc = models.DateField("Kết thúc", null=True, blank=True, help_text="Sau ngày này không gửi số của chiến dịch nữa.")
+    dang_chay = models.BooleanField("Đang chạy", default=True)
+    tao_luc = models.DateTimeField("Tạo lúc", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "chiến dịch"
+        verbose_name_plural = "Chiến dịch"
+        ordering = ["-tao_luc"]
+
+    def con_hieu_luc(self, ngay=None):
+        from django.utils import timezone
+        ngay = ngay or timezone.localdate()
+        return self.dang_chay and (not self.bat_dau or self.bat_dau <= ngay) and (not self.ket_thuc or ngay <= self.ket_thuc)
+
+    def __str__(self):
+        return self.ten
 
 
 # ---------- người nhận ----------
@@ -200,11 +252,21 @@ class NguoiNhan(models.Model):
                              help_text="Ghi vào tên gợi nhớ ({duan}). Để trống thì dùng tên dự án mặc định trong Cài đặt gửi tin.")
     phu_trach = models.ForeignKey(
         NguoiDung, verbose_name="Nhân viên phụ trách", null=True, blank=True, on_delete=models.SET_NULL,
-        related_name="nguoi_nhan", limit_choices_to={"vai_tro__in": [NguoiDung.QUAN_TRI, NguoiDung.NHAN_VIEN]},
+        related_name="nguoi_nhan",
+        limit_choices_to={"vai_tro__in": [NguoiDung.QUAN_TRI, NguoiDung.TRUONG_NHOM, NguoiDung.NHAN_VIEN]},
     )
     quan_tri_giao = models.BooleanField(
         "Quản trị giao", default=False,
         help_text="Số do quản trị nhập / giao: nhân viên không xoá hay đổi SĐT được, chỉ sửa tên, nội dung, dự án.")
+    chien_dich = models.ForeignKey(ChienDich, verbose_name="Chiến dịch", null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="nguoi_nhan", help_text="Để trống = Chung (không thuộc chiến dịch nào).")
+    xung_ho = models.CharField("Xưng hô", max_length=20, blank=True, help_text="Anh / Chị... dùng cho {xungho}.")
+    them = models.JSONField("Cột thêm từ file", default=dict, blank=True,
+                            help_text="Các cột khác trong file Excel, dùng được trong nội dung bằng {tên cột viết liền không dấu}.")
+    nguon = models.CharField("Nguồn danh sách", max_length=255, blank=True, db_index=True,
+                             help_text="Danh sách lấy từ đâu (vd: khách đăng ký sự kiện 10/2026). Nên ghi để biết nguồn gốc dữ liệu.")
+    gui_lai_tu = models.DateTimeField("Gửi lại từ", null=True, blank=True, editable=False,
+                                      help_text="Số trong chiến dịch được bấm Gửi lại: chỉ tính kết quả sau thời điểm này.")
     tao_luc = models.DateTimeField("Thêm lúc", auto_now_add=True)
 
     class Meta:
@@ -233,6 +295,7 @@ class KetQua(models.Model):
     thoi_gian = models.DateTimeField("Thời gian gửi")
     nguoi_gui = models.ForeignKey(NguoiDung, verbose_name="Người bấm gửi", null=True, blank=True,
                                   on_delete=models.SET_NULL, related_name="da_gui")
+    zalo_uid = models.CharField("Zalo ID", max_length=40, blank=True, db_index=True, editable=False)
 
     class Meta:
         verbose_name = "kết quả gửi (mới nhất)"
@@ -262,6 +325,14 @@ class LichSuGui(models.Model):
     thoi_gian = models.DateTimeField("Thời gian gửi", db_index=True)
     nguoi_gui = models.ForeignKey(NguoiDung, verbose_name="Nhân viên gửi", null=True, blank=True,
                                   on_delete=models.SET_NULL, related_name="lich_su_gui")
+    LAN_DAU, KHI_DONG_Y, NHAC_LAI = "lan_dau", "khi_dong_y", "nhac_lai"
+    LOAI = [(LAN_DAU, "Lần đầu"), (KHI_DONG_Y, "Khi khách đồng ý kết bạn"), (NHAC_LAI, "Nhắc lại")]
+    loai = models.CharField("Loại", max_length=12, choices=LOAI, default=LAN_DAU, db_index=True)
+    chien_dich = models.ForeignKey(ChienDich, verbose_name="Chiến dịch", null=True, blank=True,
+                                   on_delete=models.SET_NULL, related_name="lich_su")
+    zalo_uid = models.CharField("Zalo ID", max_length=40, blank=True, db_index=True, editable=False)
+    dot = models.ForeignKey("DotGui", verbose_name="Đợt gửi", null=True, blank=True, on_delete=models.SET_NULL,
+                            related_name="lich_su")
 
     class Meta:
         verbose_name = "lịch sử gửi"
@@ -319,6 +390,67 @@ class CaiDat(models.Model):
     mau_ten_goi_nho = models.CharField("Mẫu tên gợi nhớ", max_length=100, default="{ten} {sdt} {duan}",
                                        help_text="{ten} = họ tên, {sdt} = số điện thoại, {duan} = tên dự án. Ví dụ: “{ten} {sdt} {duan}” → “Anh Nam 0901234567 Palm City”.")
 
+    # Chăm sóc tự động (theo dõi khách đồng ý kết bạn / trả lời)
+    theo_doi_phan_hoi = models.BooleanField(
+        "Theo dõi khách đồng ý kết bạn và trả lời", default=True,
+        help_text="Tool ghi lại khách nào đã đồng ý kết bạn, đã nhắn lại (không lưu nội dung khách nhắn).")
+    gui_tin_khi_dong_y = models.BooleanField(
+        "Tự gửi tin khi khách đồng ý kết bạn", default=True,
+        help_text="Nhiều khách chặn tin từ người lạ nên tin đầu không tới. Khi khách đồng ý kết bạn, tool tự gửi tin "
+                  "(chỉ khi tin đầu chưa tới, hoặc khi có soạn “Tin gửi khi đồng ý” bên dưới).")
+    tin_khi_dong_y = models.TextField(
+        "Tin gửi khi khách đồng ý kết bạn", blank=True,
+        help_text="Để trống: gửi lại tin nhắn chính (kèm ảnh) nếu tin đầu chưa tới. Có nội dung: luôn gửi tin này khi khách "
+                  "đồng ý. Dùng được {ten}, {duan}, {nhanvien}, {xungho}. " + HD_XAO)
+    nhac_lai_sau_ngay = models.PositiveSmallIntegerField(
+        "Nhắc lại sau (ngày)", default=0, validators=[MaxValueValidator(90)],
+        help_text="Khách chưa trả lời sau bấy nhiêu ngày kể từ lần gửi đầu thì tool tự gửi tin nhắc lại một lần "
+                  "(khi Zalo của nhân viên đang kết nối và rảnh, trong khung giờ gửi). 0 = không nhắc lại.")
+    noi_dung_nhac_lai = models.TextField("Tin nhắc lại", blank=True,
+                                         help_text="Bắt buộc khi bật nhắc lại. " + HD_XAO)
+    khong_nhan_lai_ngay = models.PositiveSmallIntegerField(
+        "Không nhắn cùng một khách quá 1 lần trong (ngày)", default=7, validators=[MaxValueValidator(365)],
+        help_text="Một khách nằm trong nhiều chiến dịch thì chiến dịch sau chỉ gửi khi lần gửi trước đã cách bấy nhiêu ngày. "
+                  "0 = không giới hạn.")
+    tu_de_spam = models.TextField(
+        "Từ dễ bị coi là spam", blank=True,
+        default="khuyến mãi khủng\ngiảm giá sốc\ncam kết lợi nhuận\nlãi suất 0%\nbấm vào link\nnhận quà miễn phí\nchỉ hôm nay\ncơ hội cuối",
+        help_text="Mỗi dòng một cụm từ. Trang gửi tin cảnh báo khi nội dung có các cụm này (không chặn gửi).")
+    # Gửi vào nhóm có thời gian chờ riêng (0 = dùng chung với gửi từng người)
+    nhom_cho_toi_thieu_giay = models.PositiveIntegerField("Gửi nhóm: chờ tối thiểu (giây)", default=0,
+                                                          help_text="0 = dùng chung thời gian chờ ở trên. Nếu đặt thì tối thiểu 30 giây.")
+    nhom_cho_toi_da_giay = models.PositiveIntegerField("Gửi nhóm: chờ tối đa (giây)", default=0)
+    nhom_nghi_sau_so_lan = models.PositiveSmallIntegerField("Gửi nhóm: nghỉ sau mỗi (nhóm)", default=0,
+                                                            validators=[MaxValueValidator(1000)], help_text="0 = dùng chung.")
+    nhom_nghi_phut = models.PositiveSmallIntegerField("Gửi nhóm: thời gian nghỉ (phút)", default=0,
+                                                      validators=[MaxValueValidator(240)], help_text="0 = dùng chung.")
+    nhan_vien_xuat_excel = models.BooleanField(
+        "Nhân viên được xuất Excel", default=True,
+        help_text="Bỏ chọn thì chỉ quản trị và tài khoản Chỉ xem tải được file Excel kết quả / lịch sử.")
+    # Báo cáo Excel tự gửi email cho quản lý
+    TAT, HANG_NGAY, HANG_TUAN = "tat", "hang_ngay", "hang_tuan"
+    bao_cao_tan_suat = models.CharField(
+        "Gửi báo cáo", max_length=10, default=TAT,
+        choices=[(TAT, "Không gửi"), (HANG_NGAY, "Cuối mỗi ngày"), (HANG_TUAN, "Cuối mỗi tuần")])
+    bao_cao_gio = models.TimeField("Gửi lúc", default=time(18, 0), help_text="Giờ Việt Nam.")
+    bao_cao_thu = models.PositiveSmallIntegerField(
+        "Gửi vào (báo cáo tuần)", default=5,
+        choices=[(0, "Thứ Hai"), (1, "Thứ Ba"), (2, "Thứ Tư"), (3, "Thứ Năm"), (4, "Thứ Sáu"), (5, "Thứ Bảy"), (6, "Chủ nhật")])
+    bao_cao_email_nhan = models.TextField(
+        "Email nhận báo cáo", blank=True,
+        help_text="Mỗi dòng (hoặc cách nhau bằng dấu phẩy) một email quản lý nhận file Excel báo cáo.")
+    gmail_gui = models.EmailField("Gmail gửi báo cáo", blank=True, default="nguyenkluanbds@gmail.com",
+                                  help_text="Tài khoản Gmail dùng để gửi email báo cáo.")
+    gmail_mat_khau = models.CharField(
+        "Mật khẩu ứng dụng của Gmail", max_length=64, blank=True,
+        help_text="Không phải mật khẩu đăng nhập Gmail. Tạo tại myaccount.google.com → Bảo mật → Xác minh 2 bước (bật) → "
+                  "Mật khẩu ứng dụng → đặt tên “Zalo Tool” → chép 16 ký tự vào đây. Để trống khi lưu thì giữ mật khẩu cũ.")
+    bao_cao_gui_luc = models.DateTimeField("Gửi báo cáo lần cuối", null=True, blank=True, editable=False)
+
+    def cac_email_nhan(self):
+        import re
+        return [e for e in re.split(r"[\s,;]+", self.bao_cao_email_nhan or "") if "@" in e]
+
     class Meta:
         verbose_name = "cài đặt gửi tin"
         verbose_name_plural = "Cài đặt gửi tin"
@@ -328,6 +460,8 @@ class CaiDat(models.Model):
             raise ValidationError({"cho_toi_da_giay": "Phải lớn hơn hoặc bằng thời gian chờ tối thiểu."})
         if self.gio_bat_dau and self.gio_ket_thuc and self.gio_ket_thuc <= self.gio_bat_dau:
             raise ValidationError({"gio_ket_thuc": "Giờ kết thúc phải sau giờ bắt đầu."})
+        if self.nhac_lai_sau_ngay and not self.noi_dung_nhac_lai.strip():
+            raise ValidationError({"noi_dung_nhac_lai": "Soạn tin nhắc lại, hoặc đặt “Nhắc lại sau” = 0 để tắt."})
 
     def save(self, *args, **kwargs):
         # Luôn chỉ có 1 dòng, và luôn giữ giới hạn an toàn
@@ -337,7 +471,22 @@ class CaiDat(models.Model):
         self.cho_toi_da_giay = max(self.cho_toi_thieu_giay, int(self.cho_toi_da_giay or 150))
         self.nghi_sau_so_lan = min(1000, max(0, int(self.nghi_sau_so_lan or 0)))
         self.nghi_phut = min(240, max(1, int(self.nghi_phut or 10)))
+        if self.nhom_cho_toi_thieu_giay:
+            self.nhom_cho_toi_thieu_giay = max(30, int(self.nhom_cho_toi_thieu_giay))
+            self.nhom_cho_toi_da_giay = max(self.nhom_cho_toi_thieu_giay, int(self.nhom_cho_toi_da_giay or 0))
         super().save(*args, **kwargs)
+
+    def cfg_nhom(self):
+        """Cấu hình cho đợt gửi vào nhóm: thời gian chờ / nghỉ riêng của gửi nhóm (nếu có đặt)."""
+        d = self.to_dict()
+        if self.nhom_cho_toi_thieu_giay:
+            d["choToiThieuGiay"], d["choToiDaGiay"] = self.nhom_cho_toi_thieu_giay, self.nhom_cho_toi_da_giay
+        if self.nhom_nghi_sau_so_lan:
+            d["nghiSauSoLan"], d["nghiPhut"] = self.nhom_nghi_sau_so_lan, self.nhom_nghi_phut or self.nghi_phut
+        return d
+
+    def cac_tu_spam(self):
+        return [x.strip().lower() for x in (self.tu_de_spam or "").splitlines() if x.strip()]
 
     @classmethod
     def lay(cls):
@@ -356,6 +505,7 @@ class CaiDat(models.Model):
             "gioKetThuc": self.gio_ket_thuc.hour * 60 + self.gio_ket_thuc.minute,
             "nghiChuNhat": self.nghi_chu_nhat,
             "doiTenGoiNho": self.doi_ten_goi_nho, "mauTenGoiNho": self.mau_ten_goi_nho, "tenDuAn": self.ten_du_an,
+            "tuSpam": self.cac_tu_spam(), "nhanVienXuatExcel": self.nhan_vien_xuat_excel,
             # Ảnh gửi kèm tin nhắn cho từng khách (đường dẫn trong data/, worker tự đọc)
             "anh": [f"{THU_MUC_ANH_TIN_NHAN}/{a.tep.name}" for a in self.anh.all()],
         }
@@ -467,6 +617,168 @@ class KhongLienHe(models.Model):
 
     def __str__(self):
         return self.sdt
+
+
+# ---------- khách hàng (CRM nhẹ): mỗi SĐT một dòng ----------
+class KhachHang(models.Model):
+    MOI, DA_GUI, DA_KET_BAN, DA_TRA_LOI, QUAN_TAM, HEN_GAP, KHONG_QUAN_TAM, DA_MUA = (
+        "moi", "da_gui", "da_ket_ban", "da_tra_loi", "quan_tam", "hen_gap", "khong_quan_tam", "da_mua")
+    TRANG_THAI = [(MOI, "Mới"), (DA_GUI, "Đã gửi"), (DA_KET_BAN, "Đã kết bạn"), (DA_TRA_LOI, "Đã trả lời"),
+                  (QUAN_TAM, "Quan tâm"), (HEN_GAP, "Hẹn xem nhà / gặp"), (KHONG_QUAN_TAM, "Không quan tâm"),
+                  (DA_MUA, "Đã mua")]
+    # Trạng thái tool tự đặt; các trạng thái sau do nhân viên chọn thì tool không ghi đè
+    TU_DONG = (MOI, DA_GUI, DA_KET_BAN, DA_TRA_LOI)
+
+    sdt = models.CharField("SĐT", max_length=10, primary_key=True)
+    zalo_uid = models.CharField("Zalo ID", max_length=40, blank=True, db_index=True)
+    ten_zalo = models.CharField("Tên Zalo", max_length=255, blank=True)
+    trang_thai = models.CharField("Trạng thái", max_length=16, choices=TRANG_THAI, default=MOI, db_index=True)
+    nhan_vien = models.ForeignKey(NguoiDung, verbose_name="Nhân viên chăm sóc", null=True, blank=True,
+                                  on_delete=models.SET_NULL, related_name="khach_hang")
+    gui_dau_luc = models.DateTimeField("Gửi lần đầu", null=True, blank=True)
+    dong_y_luc = models.DateTimeField("Đồng ý kết bạn lúc", null=True, blank=True, db_index=True)
+    tra_loi_luc = models.DateTimeField("Trả lời gần nhất", null=True, blank=True, db_index=True)
+    so_lan_tra_loi = models.PositiveIntegerField("Số lần trả lời", default=0)
+    da_nhac_lai = models.BooleanField("Đã nhắc lại", default=False)
+    ghi_chu = models.TextField("Ghi chú", blank=True)
+    cap_nhat = models.DateTimeField("Cập nhật", auto_now=True)
+
+    class Meta:
+        verbose_name = "khách hàng"
+        verbose_name_plural = "Khách hàng"
+        ordering = ["-cap_nhat"]
+
+    def dat_trang_thai_tu_dong(self, tt):
+        """Tool chỉ nâng trạng thái tự động (Mới → Đã gửi → Đã kết bạn → Đã trả lời), không đè trạng thái nhân viên chọn."""
+        if self.trang_thai in self.TU_DONG and self.TU_DONG.index(tt) > self.TU_DONG.index(self.trang_thai):
+            self.trang_thai = tt
+
+    def __str__(self):
+        return self.sdt
+
+
+# ---------- đợt gửi ----------
+class DotGui(models.Model):
+    DANG_CHAY, XONG, DA_DUNG, TU_DUNG, GIAN_DOAN = "dang_chay", "xong", "da_dung", "tu_dung", "gian_doan"
+    TRANG_THAI = [(DANG_CHAY, "Đang chạy"), (XONG, "Hoàn tất"), (DA_DUNG, "Đã dừng"), (TU_DUNG, "Tự dừng vì lỗi"),
+                  (GIAN_DOAN, "Bị gián đoạn")]
+    CA_NHAN, NHOM, NHAC_LAI = "ca_nhan", "nhom", "nhac_lai"
+    LOAI = [(CA_NHAN, "Gửi từng người"), (NHOM, "Gửi nhóm"), (NHAC_LAI, "Nhắc lại tự động")]
+
+    nguoi_gui = models.ForeignKey(NguoiDung, verbose_name="Người gửi", null=True, on_delete=models.SET_NULL,
+                                  related_name="dot_gui")
+    loai = models.CharField("Loại", max_length=10, choices=LOAI, default=CA_NHAN)
+    bat_dau = models.DateTimeField("Bắt đầu", auto_now_add=True, db_index=True)
+    ket_thuc = models.DateTimeField("Kết thúc", null=True, blank=True)
+    tong = models.PositiveIntegerField("Tổng", default=0)
+    da_gui = models.PositiveIntegerField("Đã xử lý", default=0)
+    trang_thai = models.CharField("Trạng thái", max_length=10, choices=TRANG_THAI, default=DANG_CHAY, db_index=True)
+    danh_sach = models.JSONField("Danh sách", default=list, blank=True, help_text="SĐT (hoặc id nhóm) của đợt.")
+    ghi_chu = models.CharField("Ghi chú", max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = "đợt gửi"
+        verbose_name_plural = "Đợt gửi"
+        ordering = ["-bat_dau"]
+
+    def __str__(self):
+        return f"Đợt {self.id} ({self.get_trang_thai_display()})"
+
+
+# ---------- hẹn giờ gửi (một lần hoặc lặp lại) ----------
+class LichHen(models.Model):
+    CA_NHAN, NHOM = "ca_nhan", "nhom"
+    LOAI = [(CA_NHAN, "Gửi danh sách khách"), (NHOM, "Gửi vào nhóm")]
+    MOT_LAN, HANG_NGAY, HANG_TUAN = "mot_lan", "hang_ngay", "hang_tuan"
+    LAP = [(MOT_LAN, "Một lần"), (HANG_NGAY, "Hằng ngày"), (HANG_TUAN, "Hằng tuần")]
+
+    nguoi = models.ForeignKey(NguoiDung, verbose_name="Người hẹn", on_delete=models.CASCADE, related_name="lich_hen")
+    loai = models.CharField("Gửi gì", max_length=10, choices=LOAI, default=CA_NHAN)
+    lap = models.CharField("Lặp lại", max_length=10, choices=LAP, default=MOT_LAN)
+    luc = models.DateTimeField("Lúc (một lần)", null=True, blank=True)
+    gio = models.TimeField("Giờ (lặp lại)", null=True, blank=True)
+    thu = models.JSONField("Thứ (hằng tuần)", default=list, blank=True, help_text="0 = thứ Hai … 6 = Chủ nhật")
+    bo_nhom = models.ForeignKey("BoNhom", verbose_name="Bộ nhóm", null=True, blank=True, on_delete=models.SET_NULL,
+                                help_text="Gửi nhóm: để trống thì gửi theo các nhóm đang chọn ở trang Gửi nhóm.")
+    dang_bat = models.BooleanField("Đang bật", default=True)
+    lan_chay_cuoi = models.DateTimeField("Chạy lần cuối", null=True, blank=True)
+    ket_qua_cuoi = models.CharField("Kết quả lần cuối", max_length=255, blank=True)
+    tao_luc = models.DateTimeField("Tạo lúc", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "lịch hẹn gửi"
+        verbose_name_plural = "Lịch hẹn gửi"
+        ordering = ["-tao_luc"]
+
+    def lan_toi(self, sau):
+        """Lần chạy kế tiếp sau thời điểm `sau` (aware), None nếu không còn."""
+        from datetime import datetime, timedelta
+
+        from django.utils import timezone
+        if not self.dang_bat:
+            return None
+        if self.lap == self.MOT_LAN:
+            return self.luc if self.luc and (not self.lan_chay_cuoi) else None
+        if not self.gio:
+            return None
+        ngay = timezone.localtime(sau).date()
+        for k in range(0, 8):
+            d = ngay + timedelta(days=k)
+            if self.lap == self.HANG_TUAN and d.weekday() not in (self.thu or []):
+                continue
+            t = timezone.make_aware(datetime.combine(d, self.gio))
+            if t > sau:
+                return t
+        return None
+
+    def mo_ta(self):
+        if self.lap == self.MOT_LAN:
+            from django.utils import timezone
+            return f"Một lần lúc {timezone.localtime(self.luc):%H:%M %d/%m/%Y}" if self.luc else "Một lần"
+        g = f"{self.gio:%H:%M}" if self.gio else "?"
+        if self.lap == self.HANG_NGAY:
+            return f"Hằng ngày lúc {g}"
+        ten = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"]
+        return f"Hằng tuần ({', '.join(ten[i] for i in sorted(self.thu or []) if 0 <= i <= 6)}) lúc {g}"
+
+    def __str__(self):
+        return f"{self.get_loai_display()}: {self.mo_ta()}"
+
+
+# ---------- bộ nhóm Zalo lưu sẵn ----------
+class BoNhom(models.Model):
+    nguoi = models.ForeignKey(NguoiDung, verbose_name="Tài khoản", on_delete=models.CASCADE, related_name="bo_nhom")
+    ten = models.CharField("Tên bộ nhóm", max_length=100)
+    nhom = models.JSONField("Các nhóm", default=list, blank=True, help_text="[{id, ten, noiDung}]")
+
+    class Meta:
+        verbose_name = "bộ nhóm"
+        verbose_name_plural = "Bộ nhóm"
+        ordering = ["ten"]
+        unique_together = [("nguoi", "ten")]
+
+    def __str__(self):
+        return self.ten
+
+
+# ---------- thư viện mẫu tin nhắn ----------
+class MauTinNhan(models.Model):
+    TIN_NHAN, LOI_MOI, NHOM = "tin_nhan", "loi_moi", "nhom"
+    LOAI = [(TIN_NHAN, "Tin nhắn cho khách"), (LOI_MOI, "Lời mời kết bạn"), (NHOM, "Tin gửi nhóm")]
+    ten = models.CharField("Tên mẫu", max_length=150)
+    loai = models.CharField("Dùng cho", max_length=10, choices=LOAI, default=TIN_NHAN)
+    noi_dung = models.TextField("Nội dung", help_text="Dùng được {ten}, {duan}, {nhanvien}, {xungho}. " + HD_XAO)
+    da_duyet = models.BooleanField("Đã duyệt", default=False, help_text="Chỉ mẫu đã duyệt mới hiện cho nhân viên chọn.")
+    nguoi_tao = models.ForeignKey(NguoiDung, verbose_name="Người tạo", null=True, blank=True, on_delete=models.SET_NULL)
+    tao_luc = models.DateTimeField("Tạo lúc", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "mẫu tin nhắn"
+        verbose_name_plural = "Thư viện mẫu tin nhắn"
+        ordering = ["loai", "ten"]
+
+    def __str__(self):
+        return self.ten
 
 
 # ---------- nhật ký ----------

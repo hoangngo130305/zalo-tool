@@ -9,14 +9,15 @@ class GuiTinConfig(AppConfig):
     def ready(self):
         from django.db.models.signals import post_delete, post_save
 
-        from .models import AnhTinNhan, CaiDat, KetQua, NguoiDung, NguoiNhan
+        from .models import AnhTinNhan, CaiDat, ChienDich, NguoiDung, NguoiNhan
         from .services import tang_phien_ban
 
         # Sửa trong trang quản trị thì trang gửi tin đang mở cũng tải lại
         def doi(**kwargs):
             tang_phien_ban()
 
-        for model in (NguoiNhan, KetQua, NguoiDung, CaiDat, AnhTinNhan):
+        # KetQua không có ở đây: kết quả gửi chỉ làm tải lại trang của người liên quan (services.tang_phien_ban(uids))
+        for model in (NguoiNhan, NguoiDung, CaiDat, AnhTinNhan, ChienDich):
             post_save.connect(doi, sender=model, dispatch_uid=f"pb-save-{model.__name__}")
             post_delete.connect(doi, sender=model, dispatch_uid=f"pb-del-{model.__name__}")
 

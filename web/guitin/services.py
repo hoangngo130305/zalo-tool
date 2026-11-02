@@ -7,7 +7,8 @@ from django.db.models import Count, Exists, Max, OuterRef, Q
 from django.utils import timezone
 from django.utils.timezone import localtime
 
-from .models import CaiDat, KetQua, KhongLienHe, LichSuGui, NguoiDung, NguoiNhan, NhatKy, chuan_hoa_sdt, q_thanh_cong
+from .models import (CaiDat, ChienDich, KetQua, KhachHang, KhongLienHe, LichSuGui, NguoiDung, NguoiNhan, NhatKy,
+                     chuan_hoa_sdt, q_thanh_cong)
 
 
 # ---------- phiên bản danh sách: tăng mỗi khi danh sách / kết quả đổi để các trang đang mở tải lại ----------
@@ -70,9 +71,10 @@ def pham_vi(user, chon="all"):
 
 
 def nguoi_duoc_giao():
-    """Những người có thể được giao số (nhân viên và quản trị đang hoạt động)."""
-    return list(NguoiDung.objects.filter(is_active=True, vai_tro__in=[NguoiDung.NHAN_VIEN, NguoiDung.QUAN_TRI])
-                .order_by("vai_tro", "ho_ten"))
+    """Những người có thể được giao số (nhân viên, trưởng nhóm và quản trị đang hoạt động)."""
+    return list(NguoiDung.objects.filter(
+        is_active=True, vai_tro__in=[NguoiDung.NHAN_VIEN, NguoiDung.TRUONG_NHOM, NguoiDung.QUAN_TRI])
+        .order_by("vai_tro", "ho_ten"))
 
 
 def staff_dict(users):
@@ -87,18 +89,85 @@ def ket_qua_dict(k):
     }
 
 
+def ket_qua_cac_dong(rows):
+    """Kết quả gửi lần đầu của từng dòng: số “Chung” lấy từ KetQua (mới nhất theo SĐT), số trong chiến dịch lấy
+    lần gửi lần đầu gần nhất trong chiến dịch đó (sau lúc bấm Gửi lại nếu có). Trả về {id dòng: KetQua|LichSuGui}."""
+    sdts = {r.sdt for r in rows if r.sdt}
+    kq = {k.sdt: k for k in KetQua.objects.filter(sdt__in=sdts).select_related("nguoi_gui")}
+    cds = {r.chien_dich_id for r in rows if r.chien_dich_id}
+    ls = {}
+    if cds:
+        for h in (LichSuGui.objects.filter(sdt__in=sdts, chien_dich_id__in=cds, loai=LichSuGui.LAN_DAU)
+                  .select_related("nguoi_gui").order_by("thoi_gian", "id")):
+            ls[(h.sdt, h.chien_dich_id)] = h          # giữ lần mới nhất
+    out = {}
+    for r in rows:
+        if not r.sdt:
+            continue
+        if r.chien_dich_id:
+            h = ls.get((r.sdt, r.chien_dich_id))
+            if h and (not r.gui_lai_tu or h.thoi_gian > r.gui_lai_tu):
+                out[r.id] = h
+        elif r.sdt in kq:
+            out[r.id] = kq[r.sdt]
+    return out
+
+
+def khach_dict(k):
+    return {"trangThai": k.trang_thai, "trangThaiTen": k.get_trang_thai_display(),
+            "dongY": localtime(k.dong_y_luc).strftime("%H:%M %d/%m") if k.dong_y_luc else None,
+            "traLoi": localtime(k.tra_loi_luc).strftime("%H:%M %d/%m") if k.tra_loi_luc else None,
+            "soLanTraLoi": k.so_lan_tra_loi, "daNhacLai": k.da_nhac_lai}
+
+
 def danh_sach(user, chon="all"):
-    qs = NguoiNhan.objects.filter(**pham_vi(user, chon)).select_related("phu_trach")
+    qs = NguoiNhan.objects.filter(**pham_vi(user, chon)).select_related("phu_trach", "chien_dich")
     rows = list(qs)
     sdts = [r.sdt for r in rows if r.sdt]
-    kq = {k.sdt: k for k in KetQua.objects.filter(sdt__in=sdts).select_related("nguoi_gui")}
+    kq = ket_qua_cac_dong(rows)
     tu_choi = set(KhongLienHe.objects.filter(sdt__in=sdts).values_list("sdt", flat=True))
+    khach = {k.sdt: k for k in KhachHang.objects.filter(sdt__in=sdts)}
     return [{
         "id": r.id, "sdt": r.sdt_goc, "ten": r.ten, "noiDung": r.noi_dung, "duAn": r.du_an, "sdtChuan": r.sdt,
-        "khoa": r.quan_tri_giao, "tuChoi": r.sdt in tu_choi,
+        "khoa": r.quan_tri_giao, "tuChoi": r.sdt in tu_choi, "xungHo": r.xung_ho, "them": r.them,
+        "chienDich": r.chien_dich_id, "chienDichTen": r.chien_dich.ten if r.chien_dich_id else "",
         "phuTrach": r.phu_trach_id, "phuTrachTen": str(r.phu_trach) if r.phu_trach else None,
-        "ketQua": ket_qua_dict(kq[r.sdt]) if r.sdt in kq else None,
+        "ketQua": ket_qua_dict(kq[r.id]) if r.id in kq else None,
+        "khach": khach_dict(khach[r.sdt]) if r.sdt in khach else None,
     } for r in rows]
+
+
+def chien_dich_dang_chay():
+    """Chiến dịch còn hiệu lực hôm nay (để chọn khi thêm số)."""
+    hom_nay = timezone.localdate()
+    return [c for c in ChienDich.objects.filter(dang_chay=True) if c.con_hieu_luc(hom_nay)]
+
+
+def khoa_cot(s):
+    """Tên cột / tên biến viết liền, không dấu, chữ thường: "Căn hộ quan tâm" -> "canhoquantam"."""
+    import unicodedata
+    s = unicodedata.normalize("NFD", str(s).lower()).replace("đ", "d")
+    return "".join(ch for ch in s if unicodedata.category(ch) != "Mn" and ch.isalnum())
+
+
+def canh_bao_noi_dung(text, loai="tin_nhan", tu_spam=None):
+    """Cảnh báo (không chặn) khi tin quá dài hoặc có cụm từ dễ bị coi là spam. Giống canhBao() ở chung.js."""
+    import re
+    out = []
+    toi_da = 150 if loai == "loi_moi" else 1000
+    for i, m in enumerate(cac_mau(text), 1):
+        ten = f"Mẫu {i}: " if len(cac_mau(text)) > 1 else ""
+        if len(m) > toi_da:
+            out.append(f"{ten}dài {len(m)} ký tự (nên dưới {toi_da})")
+        thap = m.lower()
+        cum = [t for t in (tu_spam or []) if t and t in thap]
+        if cum:
+            out.append(f"{ten}có cụm từ dễ bị coi là spam: {', '.join(cum)}")
+        if len(re.findall(r"https?://|www\.", thap)) > 1:
+            out.append(f"{ten}có nhiều đường link")
+        if m.count("!") >= 4:
+            out.append(f"{ten}có nhiều dấu chấm than")
+    return out
 
 
 def cac_mau(text):
@@ -121,13 +190,17 @@ def xao(text):
     return t
 
 
-def dien(tpl, ten, du_an="", nhan_vien=""):
+def dien(tpl, ten, du_an="", nhan_vien="", them=None):
     """Thay {ten} bằng tên người nhận (trống thì thành "bạn"), {duan} bằng tên dự án, {nhanvien} bằng tên
-    nhân viên phụ trách. Giống fill() ở worker và ở chung.js."""
+    nhân viên phụ trách. Giống fill() ở worker và ở chung.js.
+    them: các biến khác {ten_bien: giá trị} (xungho, sdt_nhanvien, cột thêm trong file Excel); biến không có thì giữ nguyên."""
     import re
     s = re.sub(r"\{ten\}", lambda m: ten or "bạn", tpl or "", flags=re.IGNORECASE)
     s = re.sub(r"\{duan\}", lambda m: du_an or "", s, flags=re.IGNORECASE)
     s = re.sub(r"\{nhanvien\}", lambda m: nhan_vien or "", s, flags=re.IGNORECASE)
+    if them:
+        bien = {khoa_cot(k): str(v) for k, v in them.items()}
+        s = re.sub(r"\{(\w+)\}", lambda m: bien.get(khoa_cot(m.group(1)), m.group(0)), s)
     return s.strip()
 
 
@@ -135,9 +208,16 @@ def nhan_vien_cua(r):
     return str(r.phu_trach) if r.phu_trach_id and r.phu_trach else ""
 
 
+def bien_them(r):
+    """Biến ngoài {ten} {duan} {nhanvien}: {xungho}, {sdt_nhanvien} và các cột thêm trong file Excel."""
+    return {**(r.them or {}), "xungho": r.xung_ho or "",
+            "sdt_nhanvien": r.phu_trach.so_dien_thoai if r.phu_trach_id and r.phu_trach else ""}
+
+
 def du_an_cua(r, cfg):
-    """Tên dự án của 1 người nhận: dự án riêng của dòng, không có thì dự án mặc định trong cài đặt."""
-    return (r.du_an or cfg.ten_du_an or "").strip()
+    """Tên dự án của 1 người nhận: dự án riêng của dòng -> dự án của chiến dịch -> dự án mặc định trong cài đặt."""
+    cd = r.chien_dich.du_an if r.chien_dich_id and r.chien_dich else ""
+    return (r.du_an or cd or cfg.ten_du_an or "").strip()
 
 
 def ten_goi_nho(tpl, ten, sdt, du_an=""):
@@ -151,17 +231,28 @@ def ten_goi_nho(tpl, ten, sdt, du_an=""):
 
 
 def loi_moi_gui(r, cfg):
-    """Lời mời kết bạn cho 1 người: của nhân viên phụ trách, trống thì của quản trị.
-    Đã thay {duan}, {nhanvien}; còn {ten} để worker thay khi gửi."""
+    """Lời mời kết bạn cho 1 người: của chiến dịch -> của nhân viên phụ trách -> của quản trị.
+    Đã thay {duan}, {nhanvien}, {xungho}...; còn {ten} để worker thay khi gửi."""
+    cd = r.chien_dich.loi_moi if r.chien_dich_id and r.chien_dich else ""
     cua_nv = r.phu_trach.loi_moi_ket_ban if r.phu_trach_id and r.phu_trach else ""
-    return dien(cua_nv or cfg.loi_moi_ket_ban, "{ten}", du_an_cua(r, cfg), nhan_vien_cua(r))
+    return dien(cd or cua_nv or cfg.loi_moi_ket_ban, "{ten}", du_an_cua(r, cfg), nhan_vien_cua(r), bien_them(r))
+
+
+def mau_tin_nhan(r, cfg):
+    """Mẫu tin nhắn (chưa điền) cho 1 người: nội dung riêng của dòng -> của chiến dịch -> tin nhắn của nhân viên
+    phụ trách -> nội dung mặc định của quản trị."""
+    cd = r.chien_dich.noi_dung if r.chien_dich_id and r.chien_dich else ""
+    cua_nv = r.phu_trach.tin_nhan_mac_dinh if r.phu_trach_id and r.phu_trach else ""
+    return r.noi_dung or cd or cua_nv or cfg.noi_dung_tin_nhan
+
+
+def dien_cho(r, cfg, tpl):
+    return dien(tpl, r.ten, du_an_cua(r, cfg), nhan_vien_cua(r), bien_them(r))
 
 
 def noi_dung_gui(r, cfg):
-    """Nội dung tin nhắn sẽ gửi cho 1 người, theo thứ tự ưu tiên:
-    nội dung riêng của dòng -> tin nhắn mặc định của nhân viên phụ trách -> nội dung mặc định của quản trị."""
-    cua_nv = r.phu_trach.tin_nhan_mac_dinh if r.phu_trach_id and r.phu_trach else ""
-    return dien(r.noi_dung or cua_nv or cfg.noi_dung_tin_nhan, r.ten, du_an_cua(r, cfg), nhan_vien_cua(r))
+    """Nội dung tin nhắn sẽ gửi cho 1 người (đã điền biến), theo thứ tự ưu tiên của mau_tin_nhan()."""
+    return dien_cho(r, cfg, mau_tin_nhan(r, cfg))
 
 
 # ---------- hạn mức mỗi ngày của từng Zalo ----------
@@ -203,15 +294,46 @@ def chua_gui_duoc(user, cfg):
     return None
 
 
-def cho_gui(user, chon, gioi_han=None):
-    """Các số còn phải gửi trong phạm vi: SĐT hợp lệ, chưa có kết quả, không trong danh sách từ chối, không trùng,
-    có nội dung (nếu gửi tin nhắn). Database tự loại các số đã gửi / từ chối."""
+def loc_cho_gui(qs, cfg):
+    """Lọc các dòng còn phải gửi (database tự lọc):
+    - số “Chung”: chưa có kết quả; số trong chiến dịch: chưa gửi lần đầu trong chiến dịch đó (sau lúc bấm Gửi lại),
+    - chiến dịch còn hiệu lực hôm nay,
+    - không trong danh sách khách từ chối,
+    - không nhắn cùng khách quá 1 lần trong N ngày giữa các chiến dịch khác nhau (khong_nhan_lai_ngay)."""
+    from datetime import datetime, timedelta
+
+    from django.db.models.functions import Coalesce
+    hom_nay = timezone.localdate()
+    dau = timezone.make_aware(datetime(2000, 1, 1))
+    da_gui_cd = LichSuGui.objects.filter(
+        sdt=OuterRef("sdt"), chien_dich=OuterRef("chien_dich"), loai=LichSuGui.LAN_DAU,
+        thoi_gian__gt=Coalesce(OuterRef("gui_lai_tu"), dau))
+    qs = (qs.exclude(sdt__isnull=True)
+          .exclude(Exists(KhongLienHe.objects.filter(sdt=OuterRef("sdt"))))
+          .filter(Q(chien_dich__isnull=True, ) & ~Exists(KetQua.objects.filter(sdt=OuterRef("sdt")))
+                  | Q(chien_dich__isnull=False) & ~Exists(da_gui_cd))
+          .filter(Q(chien_dich__isnull=True)
+                  | Q(chien_dich__dang_chay=True)
+                  & (Q(chien_dich__bat_dau__isnull=True) | Q(chien_dich__bat_dau__lte=hom_nay))
+                  & (Q(chien_dich__ket_thuc__isnull=True) | Q(chien_dich__ket_thuc__gte=hom_nay))))
+    if cfg.khong_nhan_lai_ngay:
+        tu = timezone.now() - timedelta(days=cfg.khong_nhan_lai_ngay)
+        gan_day = LichSuGui.objects.filter(sdt=OuterRef("sdt"), thoi_gian__gte=tu)
+        qs = qs.exclude(Q(chien_dich__isnull=True) & Exists(gan_day.filter(chien_dich__isnull=False))
+                        | Q(chien_dich__isnull=False)
+                        & Exists(gan_day.filter(Q(chien_dich__isnull=True) | ~Q(chien_dich=OuterRef("chien_dich")))))
+    return qs
+
+
+def cho_gui(user, chon, gioi_han=None, chi_sdt=None):
+    """Các số còn phải gửi trong phạm vi (xem loc_cho_gui), không trùng, có nội dung (nếu gửi tin nhắn).
+    chi_sdt: chỉ lấy các số này (tiếp tục đợt bị gián đoạn)."""
     cfg = CaiDat.lay()
     seen, out = set(), []
-    qs = (NguoiNhan.objects.filter(**pham_vi(user, chon)).exclude(sdt__isnull=True)
-          .exclude(Exists(KetQua.objects.filter(sdt=OuterRef("sdt"))))
-          .exclude(Exists(KhongLienHe.objects.filter(sdt=OuterRef("sdt"))))
-          .select_related("phu_trach"))
+    qs = NguoiNhan.objects.filter(**pham_vi(user, chon))
+    if chi_sdt is not None:
+        qs = qs.filter(sdt__in=list(chi_sdt))
+    qs = loc_cho_gui(qs, cfg).select_related("phu_trach", "chien_dich")
     for r in qs:
         if r.sdt in seen:
             continue
@@ -237,39 +359,57 @@ def luu_danh_sach(user, rows):
     - dòng có id: cập nhật; số quản trị giao thì không đổi được SĐT,
     - dòng mới: thêm, trừ số đã nằm trong danh sách của người khác hoặc khách đã từ chối liên hệ,
     - dòng bị bỏ: xoá, trừ số quản trị giao (nhân viên không xoá được).
-    Trả về {"trungNguoiKhac": [...], "tuChoi": [...], "giuLai": số dòng quản trị giao không xoá}."""
+    Số trùng tính theo cặp (SĐT, chiến dịch): cùng một khách được nằm ở nhiều chiến dịch khác nhau.
+    Trả về {"trungNguoiKhac": [...], "tuChoi": [...], "giuLai": số dòng quản trị giao không xoá, "daXoa": số dòng xoá}."""
     cua_toi = {r.id: r for r in NguoiNhan.objects.select_for_update().filter(phu_trach=user)}
     base = NguoiNhan.objects.aggregate(m=Max("thu_tu"))["m"] or 0
-    cot = ("sdt_goc", "sdt", "ten", "noi_dung", "du_an")
+    cot = ("sdt_goc", "sdt", "ten", "noi_dung", "du_an", "chien_dich_id", "xung_ho")
+    cd_hop_le = {c.id for c in chien_dich_dang_chay()} | {r.chien_dich_id for r in cua_toi.values() if r.chien_dich_id}
+
+    def cd_cua(r):
+        try:
+            cd = int(r.get("chienDich") or 0) or None
+        except (TypeError, ValueError):
+            cd = None
+        return cd if cd in cd_hop_le else None
+
     moi_sdt = {chuan_hoa_sdt(r.get("sdt")) for r in rows if _id(r) not in cua_toi} - {None}
-    cua_nguoi_khac = set(NguoiNhan.objects.filter(sdt__in=moi_sdt).exclude(phu_trach=user).values_list("sdt", flat=True))
+    cua_nguoi_khac = set(NguoiNhan.objects.filter(sdt__in=moi_sdt).exclude(phu_trach=user)
+                         .values_list("sdt", "chien_dich_id"))
     tu_choi_set = set(KhongLienHe.objects.filter(sdt__in=moi_sdt).values_list("sdt", flat=True))
     giu, sua, moi, trung_khac, tu_choi = set(), [], [], [], []
     for r in rows:
         d = {"sdt_goc": str(r.get("sdt") or "").strip()[:32], "ten": str(r.get("ten") or "").strip()[:255],
-             "noi_dung": str(r.get("noiDung") or "").strip()[:5000], "du_an": str(r.get("duAn") or "").strip()[:100]}
+             "noi_dung": str(r.get("noiDung") or "").strip()[:5000], "du_an": str(r.get("duAn") or "").strip()[:100],
+             "chien_dich_id": cd_cua(r), "xung_ho": str(r.get("xungHo") or "").strip()[:20]}
         d["sdt"] = chuan_hoa_sdt(d["sdt_goc"])
         cu = cua_toi.get(_id(r))
         if cu:
             giu.add(cu.id)
-            if cu.quan_tri_giao:
-                d["sdt_goc"], d["sdt"] = cu.sdt_goc, cu.sdt
+            if cu.quan_tri_giao:      # số quản trị giao: không đổi SĐT, chiến dịch
+                d["sdt_goc"], d["sdt"], d["chien_dich_id"] = cu.sdt_goc, cu.sdt, cu.chien_dich_id
             if any(getattr(cu, k) != d[k] for k in cot):
                 for k in cot:
                     setattr(cu, k, d[k])
                 sua.append(cu)
-        elif d["sdt"] in cua_nguoi_khac:
+        elif (d["sdt"], d["chien_dich_id"]) in cua_nguoi_khac:
             trung_khac.append(d["sdt"])
         elif d["sdt"] in tu_choi_set:
             tu_choi.append(d["sdt"])
         else:
-            moi.append(NguoiNhan(phu_trach=user, thu_tu=base + len(moi) + 1, **d))
+            them = r.get("them") if isinstance(r.get("them"), dict) else {}
+            moi.append(NguoiNhan(phu_trach=user, thu_tu=base + len(moi) + 1,
+                                 them={str(k)[:50]: str(v)[:500] for k, v in list(them.items())[:30]}, **d))
     bo = [r for rid, r in cua_toi.items() if rid not in giu]
-    NguoiNhan.objects.filter(id__in=[r.id for r in bo if not r.quan_tri_giao]).delete()
+    xoa = [r for r in bo if not r.quan_tri_giao]
+    NguoiNhan.objects.filter(id__in=[r.id for r in xoa]).delete()
     NguoiNhan.objects.bulk_update(sua, cot, batch_size=500)
     NguoiNhan.objects.bulk_create(moi, batch_size=500)
+    if xoa:      # nhật ký thao tác: ai xoá số nào
+        ds = ", ".join(r.sdt_goc or "(trống)" for r in xoa[:20]) + ("…" if len(xoa) > 20 else "")
+        ghi_log(f"{user} đã xoá {len(xoa)} số khỏi danh sách của mình: {ds}.", "warn", user)
     tang_phien_ban([user.id])
-    return {"trungNguoiKhac": trung_khac, "tuChoi": tu_choi, "giuLai": sum(1 for r in bo if r.quan_tri_giao)}
+    return {"trungNguoiKhac": trung_khac, "tuChoi": tu_choi, "giuLai": len(bo) - len(xoa), "daXoa": len(xoa)}
 
 
 @transaction.atomic
@@ -379,19 +519,16 @@ def _bang_tu_file(data):
         raise ValueError(f"File CSV bị lỗi định dạng ({e}). Mở file bằng Excel rồi lưu thành .xlsx và nhập lại.") from e
 
 
-def doc_file(data):
-    """Đọc file Excel (.xlsx/.xls) hoặc CSV: cột SĐT / Số điện thoại / Phone, Tên / Họ tên / Name,
-    và (không bắt buộc) Nội dung / Nội dung tin nhắn / Tin nhắn / Message.
-    Dòng tiêu đề không cần nằm ở dòng đầu (bỏ qua dòng tên bảng phía trên)."""
-    import unicodedata
+COT_NHAP = [("sdt", "SĐT"), ("ten", "Họ tên"), ("noiDung", "Nội dung"), ("duAn", "Dự án"), ("xungHo", "Xưng hô")]
 
+
+def phan_tich_file(data):
+    """Đọc file và đoán cột: trả về {"rows": các dòng, "dong_tieu_de": chỉ số dòng tiêu đề, "tieu_de": [...],
+    "ghep": {"sdt": cột, "ten": cột, ...}} (cột = chỉ số, None nếu không có). Dòng tiêu đề không cần ở dòng đầu."""
     rows = _bang_tu_file(data)
     if not rows:
-        return []
-
-    def key(s):
-        s = unicodedata.normalize("NFD", str(s).lower()).replace("đ", "d")
-        return "".join(ch for ch in s if unicodedata.category(ch) != "Mn" and ch.isalnum())
+        raise ValueError("File không có dữ liệu.")
+    key = khoa_cot
 
     def la_sdt(h):
         return h in ("sdt", "sodienthoai", "dienthoai", "phone", "sodt", "didong", "mobile", "tel") or \
@@ -407,6 +544,9 @@ def doc_file(data):
     def la_du_an(h):
         return h in ("duan", "tenduan", "project", "duanquantam", "sanpham")
 
+    def la_xung_ho(h):
+        return h in ("xungho", "danhxung", "gioitinh", "anhchi", "title", "gender")
+
     # Tìm dòng tiêu đề trong 10 dòng đầu
     for hi, r in enumerate(rows[:10]):
         head = [key(h) for h in r]
@@ -414,15 +554,39 @@ def doc_file(data):
         if sdt_cot is not None:
             break
     else:
-        raise ValueError("Không thấy cột SĐT. File cần có cột SĐT (hoặc Số điện thoại / Phone) và cột Tên. "
-                         "Bấm “Tải file mẫu” để xem mẫu.")
-    ten_cot = next((i for i, h in enumerate(head) if i != sdt_cot and la_ten(h)), None)
-    nd_cot = next((i for i, h in enumerate(head) if la_nd(h)), None)
-    da_cot = next((i for i, h in enumerate(head) if la_du_an(h)), None)
-    out = []
+        hi, head, sdt_cot = 0, [key(h) for h in rows[0]], None
+    ghep = {"sdt": sdt_cot,
+            "ten": next((i for i, h in enumerate(head) if i != sdt_cot and la_ten(h)), None),
+            "noiDung": next((i for i, h in enumerate(head) if la_nd(h)), None),
+            "duAn": next((i for i, h in enumerate(head) if la_du_an(h)), None),
+            "xungHo": next((i for i, h in enumerate(head) if la_xung_ho(h)), None)}
+    return {"rows": rows, "dong_tieu_de": hi, "tieu_de": [str(h) for h in rows[hi]], "ghep": ghep}
+
+
+def doc_file(data, ghep=None):
+    """Đọc file Excel (.xlsx/.xls) hoặc CSV: cột SĐT / Số điện thoại / Phone, Tên / Họ tên / Name,
+    và (không bắt buộc) Nội dung, Dự án, Xưng hô. Các cột khác được giữ trong "them" để dùng làm biến {tencot}.
+    ghep: chọn cột thủ công {"sdt": chỉ số cột, ...} (khi không tự nhận được). Trả về danh sách dòng."""
     from .models import tach_sdt
+    pt = phan_tich_file(data)
+    rows, hi, tieu_de = pt["rows"], pt["dong_tieu_de"], pt["tieu_de"]
+    if ghep:
+        g = {k: (int(v) if v not in (None, "") and int(v) >= 0 else None) for k, v in ghep.items() if k in dict(COT_NHAP)}
+        pt["ghep"].update(g)
+    ghep = pt["ghep"]
+    if ghep.get("sdt") is None:
+        raise ValueError("Không thấy cột SĐT. File cần có cột SĐT (hoặc Số điện thoại / Phone) và cột Tên. "
+                         "Bấm “Tải file mẫu” để xem mẫu, hoặc chọn cột thủ công ở bước xem trước.")
+    dung = {v for v in ghep.values() if v is not None}
+    cot_them = [(i, khoa_cot(h)) for i, h in enumerate(tieu_de) if i not in dung and khoa_cot(h)]
+
+    def o(r, k):
+        i = ghep.get(k)
+        return str(r[i]).strip() if i is not None and i < len(r) else ""
+
+    out = []
     for r in rows[hi + 1:]:
-        sdt = str(r[sdt_cot] if sdt_cot < len(r) else "").strip()
+        sdt = o(r, "sdt")
         if sdt.endswith(".0"):
             sdt = sdt[:-2]
         # Ô ghi nhiều số / số 11 chữ số cũ: lấy số hợp lệ đầu tiên
@@ -430,10 +594,37 @@ def doc_file(data):
         if cac_so:
             sdt = cac_so[0]
         if sdt:
-            out.append({"sdt": sdt, "ten": r[ten_cot] if ten_cot is not None and ten_cot < len(r) else "",
-                        "noiDung": r[nd_cot] if nd_cot is not None and nd_cot < len(r) else "",
-                        "duAn": r[da_cot] if da_cot is not None and da_cot < len(r) else ""})
+            them = {k: str(r[i]).strip()[:500] for i, k in cot_them if i < len(r) and str(r[i]).strip()}
+            out.append({"sdt": sdt, "ten": o(r, "ten"), "noiDung": o(r, "noiDung"), "duAn": o(r, "duAn"),
+                        "xungHo": o(r, "xungHo")[:20], "them": them})
     return out
+
+
+def xem_truoc_nhap(rows, chien_dich=None):
+    """Xem trước khi nhập: bao nhiêu số hợp lệ, sai, trùng trong file, đã có trong danh sách (cùng chiến dịch),
+    khách từ chối, đã từng được gửi."""
+    hop_le, sai, trung_file = [], 0, 0
+    seen = set()
+    for r in rows:
+        s = chuan_hoa_sdt(r.get("sdt"))
+        if not s:
+            sai += 1
+        elif s in seen:
+            trung_file += 1
+        else:
+            seen.add(s)
+            hop_le.append(s)
+    cd_id = chien_dich.id if chien_dich else None
+    da_co = set(NguoiNhan.objects.filter(sdt__in=hop_le, chien_dich_id=cd_id).values_list("sdt", flat=True))
+    tu_choi = set(KhongLienHe.objects.filter(sdt__in=hop_le).values_list("sdt", flat=True))
+    da_gui = set(LichSuGui.objects.filter(sdt__in=hop_le).values_list("sdt", flat=True).distinct())
+    cua_ai = {}
+    for s, ten in NguoiNhan.objects.filter(sdt__in=da_co, chien_dich_id=cd_id).values_list("sdt", "phu_trach__ho_ten"):
+        cua_ai[ten or "Chưa giao"] = cua_ai.get(ten or "Chưa giao", 0) + 1
+    moi = [s for s in hop_le if s not in da_co and s not in tu_choi]
+    return {"tong": len(rows), "hopLe": len(hop_le), "sai": sai, "trungTrongFile": trung_file,
+            "daCo": len(da_co), "daCoCuaAi": cua_ai, "tuChoi": len(tu_choi), "seThem": len(moi),
+            "daTungGui": len([s for s in moi if s in da_gui])}
 
 
 def doc_van_ban(text):
@@ -458,11 +649,13 @@ def doc_van_ban(text):
 
 
 @transaction.atomic
-def nhap_them(rows, phu_trach=None, du_an=""):
-    """Quản trị nhập thêm số vào cuối danh sách, bỏ qua số đã có (của bất kỳ ai) và khách đã từ chối liên hệ.
+def nhap_them(rows, phu_trach=None, du_an="", chien_dich=None, nguon=""):
+    """Quản trị nhập thêm số vào cuối danh sách, bỏ qua số đã có (của bất kỳ ai, cùng chiến dịch) và khách đã từ chối.
     Trả về {"them", "trung", "tuChoi", "daGui"} (daGui: trong số mới thêm, bao nhiêu số đã từng được gửi).
-    du_an: tên dự án cho các dòng không có cột Dự án. Số được giao cho nhân viên thì nhân viên không xoá được."""
-    da_co = set(NguoiNhan.objects.exclude(sdt__isnull=True).values_list("sdt", flat=True))
+    du_an: tên dự án cho các dòng không có cột Dự án. Số được giao cho nhân viên thì nhân viên không xoá được.
+    nguon: nguồn gốc danh sách (ghi lại để biết dữ liệu lấy từ đâu)."""
+    cd_id = chien_dich.id if chien_dich else None
+    da_co = set(NguoiNhan.objects.filter(chien_dich_id=cd_id).exclude(sdt__isnull=True).values_list("sdt", flat=True))
     tu_choi_set = set(KhongLienHe.objects.values_list("sdt", flat=True))
     base = NguoiNhan.objects.aggregate(m=Max("thu_tu"))["m"] or 0
     moi, trung, tu_choi = [], 0, 0
@@ -479,24 +672,39 @@ def nhap_them(rows, phu_trach=None, du_an=""):
         moi.append(NguoiNhan(thu_tu=base + len(moi) + 1, sdt_goc=str(r.get("sdt") or "").strip()[:32], sdt=sdt,
                              ten=str(r.get("ten") or "").strip()[:255], noi_dung=str(r.get("noiDung") or "").strip()[:5000],
                              du_an=(str(r.get("duAn") or "").strip() or du_an or "")[:100], phu_trach=phu_trach,
-                             quan_tri_giao=phu_trach is not None))
+                             quan_tri_giao=phu_trach is not None, chien_dich=chien_dich,
+                             xung_ho=str(r.get("xungHo") or "").strip()[:20],
+                             them=r.get("them") if isinstance(r.get("them"), dict) else {},
+                             nguon=(nguon or "").strip()[:255]))
     NguoiNhan.objects.bulk_create(moi, batch_size=500)
-    da_gui = KetQua.objects.filter(sdt__in=[m.sdt for m in moi if m.sdt]).count()
+    da_gui = LichSuGui.objects.filter(sdt__in=[m.sdt for m in moi if m.sdt]).values("sdt").distinct().count()
     tang_phien_ban()
     return {"them": len(moi), "trung": trung, "tuChoi": tu_choi, "daGui": da_gui}
 
 
 # ---------- thống kê cho bảng điều khiển ----------
-def thong_ke():
+def _da_gui_dong(chi_thanh_cong=False):
+    """Biểu thức: dòng người nhận đã được gửi lần đầu (số Chung: theo KetQua; số trong chiến dịch: theo lịch sử
+    của chiến dịch đó). chi_thanh_cong: chỉ tính gửi thành công."""
+    from datetime import datetime
+
+    from django.db.models.functions import Coalesce
+    kq = KetQua.objects.filter(sdt=OuterRef("sdt"))
+    ls = LichSuGui.objects.filter(sdt=OuterRef("sdt"), chien_dich=OuterRef("chien_dich"), loai=LichSuGui.LAN_DAU,
+                                  thoi_gian__gt=Coalesce(OuterRef("gui_lai_tu"), timezone.make_aware(datetime(2000, 1, 1))))
+    if chi_thanh_cong:
+        kq, ls = kq.filter(q_thanh_cong()), ls.filter(q_thanh_cong())
+    return Q(chien_dich__isnull=True) & Exists(kq) | Q(chien_dich__isnull=False) & Exists(ls)
+
+
+def thong_ke(qs=None):
     """Đếm theo nhân viên phụ trách; database tự đếm (không tải cả bảng lên).
     da_gui = gửi thành công (định nghĩa chung thanh_cong()); cho = còn phải gửi; loi = phần còn lại
     (gửi lỗi, số sai, khách từ chối liên hệ)."""
-    co_kq = Exists(KetQua.objects.filter(sdt=OuterRef("sdt")))
-    ok = Exists(KetQua.objects.filter(q_thanh_cong(), sdt=OuterRef("sdt")))
     tc = Exists(KhongLienHe.objects.filter(sdt=OuterRef("sdt")))
-    dem = (NguoiNhan.objects.annotate(co_kq=co_kq, ok=ok, tc=tc).values("phu_trach_id")
-           .annotate(tong=Count("id"), da_gui=Count("id", filter=Q(ok=True)),
-                     cho=Count("id", filter=Q(sdt__isnull=False, co_kq=False, tc=False))).order_by())
+    dem = ((qs if qs is not None else NguoiNhan.objects.all()).values("phu_trach_id")
+           .annotate(tong=Count("id"), da_gui=Count("id", filter=_da_gui_dong(True)),
+                     cho=Count("id", filter=Q(sdt__isnull=False) & ~_da_gui_dong() & ~tc)).order_by())
     ten = {u.id: str(u) for u in NguoiDung.objects.filter(id__in=[d["phu_trach_id"] for d in dem if d["phu_trach_id"]])}
     nhom = {}
     tong = {"tong": 0, "cho": 0, "da_gui": 0, "loi": 0}
@@ -524,7 +732,7 @@ def loc_lich_su(user, q="", tt="", tu="", den="", nguoi=""):
 
     qs = LichSuGui.objects.select_related("nguoi_gui")
     if not user.co_quyen("all"):
-        qs = qs.filter(nguoi_gui=user)
+        qs = qs.filter(nguoi_gui__in=user.thanh_vien_doi())     # nhân viên: của mình; trưởng nhóm: cả đội
     elif nguoi:
         qs = qs.filter(nguoi_gui_id=int(nguoi))
     if q:
@@ -691,3 +899,25 @@ def lich_su_nhom_dict(h):
         "noiDung": h.noi_dung, "soAnh": h.so_anh, "ghiChu": h.ghi_chu, "taiKhoanZalo": h.tai_khoan_zalo,
         "thoiGian": localtime(h.thoi_gian).strftime("%H:%M:%S %d/%m/%Y"), "nguoiGui": str(h.nguoi_gui or ""),
     }
+
+
+# ---------- xoá dữ liệu khách theo yêu cầu (bảo vệ dữ liệu cá nhân) ----------
+@transaction.atomic
+def xoa_du_lieu_khach(sdts, user):
+    """Khách yêu cầu xoá dữ liệu: xoá khỏi danh sách người nhận, kết quả, hồ sơ khách; xoá tên / nội dung trong lịch sử
+    gửi (chỉ giữ SĐT và thời gian để tính hạn mức); đưa SĐT vào danh sách từ chối để không bao giờ liên hệ lại.
+    Trả về số khách đã xoá."""
+    sdts = {s for s in sdts if s}
+    if not sdts:
+        return 0
+    NguoiNhan.objects.filter(sdt__in=sdts).delete()
+    KetQua.objects.filter(sdt__in=sdts).delete()
+    KhachHang.objects.filter(sdt__in=sdts).delete()
+    LichSuGui.objects.filter(sdt__in=sdts).update(ten="", ten_zalo="", noi_dung="", ghi_chu="(đã xoá theo yêu cầu của khách)",
+                                                  zalo_uid="")
+    for s in sdts:
+        KhongLienHe.objects.update_or_create(sdt=s, defaults={"ly_do": "Khách yêu cầu xoá dữ liệu", "nguoi_them": user})
+    ghi_log(f"{user} đã xoá dữ liệu của {len(sdts)} khách theo yêu cầu (giữ SĐT trong danh sách từ chối liên hệ).",
+            "warn", user)
+    tang_phien_ban()
+    return len(sdts)
