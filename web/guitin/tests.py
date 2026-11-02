@@ -236,6 +236,12 @@ class WorkerBaoVe(CoSo):
         self.bao({"type": "auto_stop", "nguoiDungId": self.nv.id, "soLoi": 5})
         self.nv.refresh_from_db()
         self.assertGreater(self.nv.tam_dung_den, timezone.now() + timedelta(hours=23))
+        # quản trị bỏ tạm dừng bằng thao tác trong danh sách Tài khoản
+        c = self.client_cua(self.admin)
+        self.assertContains(c.get("/admin/guitin/nguoidung/"), "Bỏ tạm dừng gửi")
+        c.post("/admin/guitin/nguoidung/", {"action": "bo_tam_dung", "_selected_action": [self.nv.id]})
+        self.nv.refresh_from_db()
+        self.assertIsNone(self.nv.tam_dung_den)
 
 
 class ThongKe(CoSo):

@@ -564,7 +564,7 @@ def api_worker_event(request):
             u.tam_dung_den = timezone.now() + timedelta(hours=cfg.tam_dung_gio)
             u.save(update_fields=["tam_dung_den"])
             sv.ghi_log(f"Zalo của {u} bị tạm dừng gửi {cfg.tam_dung_gio} giờ vì gặp {b.get('soLoi')} lỗi liên tiếp. "
-                       f"Kiểm tra Zalo trên điện thoại; quản trị bỏ tạm dừng trong Tài khoản nếu muốn gửi lại sớm.", "error", u)
+                       f"Kiểm tra Zalo trên điện thoại; muốn gửi lại sớm thì quản trị vào Quản trị → Tài khoản, tick tài khoản → thao tác “Bỏ tạm dừng gửi”.", "error", u)
             sv.tang_phien_ban([u.id])
     elif b.get("type") == "log":
         NhatKy.objects.create(noi_dung=str(b.get("text", ""))[:5000], muc=b.get("level") or "info",

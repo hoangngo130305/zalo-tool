@@ -5,6 +5,7 @@ from django.contrib.auth.forms import BaseUserCreationForm, UserChangeForm
 from django.db.models import Count, OuterRef, Subquery
 from django.shortcuts import redirect
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.html import format_html
 
 from . import services as sv
@@ -34,13 +35,15 @@ class NguoiDungAdmin(UserAdmin):
     form = SuaTaiKhoanForm
     add_form = TaoTaiKhoanForm
     ordering = ("vai_tro", "ho_ten")
-    list_display = ("ho_ten", "email", "vai_tro_pill", "doi", "so_duoc_giao", "is_active", "last_login")
+    list_display = ("ho_ten", "email", "vai_tro_pill", "doi", "so_duoc_giao", "tam_dung", "is_active", "last_login")
     list_filter = ("vai_tro", "doi", "is_active")
     search_fields = ("email", "ho_ten")
     fieldsets = (
         ("Thông tin", {"fields": ("email", "ho_ten", "password", "so_dien_thoai")}),
         ("Tin nhắn", {"fields": ("tin_nhan_mac_dinh", "loi_moi_ket_ban")}),
-        ("Giới hạn gửi của Zalo này", {"fields": ("gioi_han_ngay", "tam_dung_den")}),
+        ("Giới hạn & tạm dừng gửi", {"fields": ("gioi_han_ngay", "tam_dung_den"),
+                                     "description": "Bỏ tạm dừng: xoá trống ô “Tạm dừng gửi đến” rồi Lưu, hoặc ở danh sách Tài khoản "
+                                                    "tick tài khoản → chọn thao tác “Bỏ tạm dừng gửi”."}),
         ("Phân quyền", {"fields": ("vai_tro", "doi", "is_active"),
                         "description": "Quản trị: toàn quyền, vào được trang này. Trưởng nhóm: dùng trang gửi tin như nhân viên, "
                                        "thêm trang “Đội của tôi” để xem và giao số cho nhân viên cùng đội (cùng tên đội). "
@@ -52,9 +55,27 @@ class NguoiDungAdmin(UserAdmin):
         (None, {"classes": ("wide",), "fields": ("email", "ho_ten", "vai_tro", "doi", "password1", "password2")}),
     )
     readonly_fields = ("last_login", "date_joined")
+    actions = ["bo_tam_dung"]
 
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(n_giao=Count("nguoi_nhan"))
+
+    @admin.display(description="Tạm dừng gửi", ordering="tam_dung_den")
+    def tam_dung(self, obj):
+        if not obj.tam_dung_den or obj.tam_dung_den <= timezone.now():
+            return "–"
+        return format_html('<span class="badge badge-danger">đến {}</span>', timezone.localtime(obj.tam_dung_den).strftime("%H:%M %d/%m"))
+
+    @admin.action(description="Bỏ tạm dừng gửi (cho Zalo gửi lại ngay)")
+    def bo_tam_dung(self, request, queryset):
+        qs = queryset.filter(tam_dung_den__gt=timezone.now())
+        ten = ", ".join(str(u) for u in qs)
+        n = qs.update(tam_dung_den=None)
+        if not n:
+            messages.info(request, "Các tài khoản đã chọn không bị tạm dừng.")
+            return
+        sv.ghi_log(f"{request.user} đã bỏ tạm dừng gửi cho: {ten}.", "warn", request.user)
+        messages.success(request, f"Đã bỏ tạm dừng cho {n} tài khoản. Nên kiểm tra Zalo trên điện thoại và gửi ít trước khi chạy đợt lớn.")
 
     @admin.display(description="Vai trò", ordering="vai_tro")
     def vai_tro_pill(self, obj):

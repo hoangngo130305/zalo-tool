@@ -287,7 +287,7 @@ def chua_gui_duoc(user, cfg):
     """Lý do Zalo của user chưa gửi được (đang tạm dừng vì lỗi, hết hạn mức hôm nay); None nếu gửi được."""
     if user.tam_dung_den and user.tam_dung_den > timezone.now():
         return (f"Zalo của bạn đang tạm dừng gửi đến {localtime(user.tam_dung_den):%H:%M %d/%m} vì đợt trước gặp nhiều lỗi "
-                f"liên tiếp (có thể Zalo đang hạn chế tài khoản). Quản trị có thể bỏ tạm dừng trong Tài khoản.")
+                f"liên tiếp (có thể Zalo đang hạn chế tài khoản). Quản trị bỏ được ở Quản trị → Tài khoản: tick tài khoản → thao tác “Bỏ tạm dừng gửi”.")
     if con_lai_hom_nay(user, cfg) == 0:
         return (f"Zalo của bạn đã gửi đủ {han_muc_ngay(user, cfg)} người hôm nay (hạn mức mỗi ngày để tránh bị Zalo khoá). "
                 f"Mai gửi tiếp nhé.")
