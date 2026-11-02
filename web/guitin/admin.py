@@ -621,7 +621,7 @@ class ChienDichAdmin(admin.ModelAdmin):
     search_fields = ("ten", "du_an")
     actions = ["xuat_excel"]
     fieldsets = (
-        (None, {"fields": ("ten", "du_an", "dang_chay", "bat_dau", "ket_thuc")}),
+        ("Thông tin chung", {"fields": ("ten", "du_an", "dang_chay", "bat_dau", "ket_thuc")}),
         ("Nội dung (để trống thì dùng của nhân viên / cài đặt chung)", {"fields": ("loi_moi", "noi_dung")}),
         ("Chăm sóc tiếp", {"fields": ("tin_khi_dong_y", "nhac_sau_ngay", "noi_dung_nhac"),
                            "description": "Chuỗi chăm sóc: ngày 0 kết bạn + gửi tin; khi khách đồng ý kết bạn thì gửi “Tin khi đồng ý”; "
