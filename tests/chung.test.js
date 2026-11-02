@@ -88,6 +88,15 @@ test("processOne: Zalo báo lỗi tìm số thì đánh dấu loiZalo", async ()
   const r = await processOne(fakeApi({ findUser: async () => { throw new Error("limit"); } }), { sdt: "0901234567" }, cfgNhanh);
   assert.ok(r.loiZalo);
 });
+test("processOne: khách chặn tin từ người lạ không tính là lỗi của Zalo", async () => {
+  const loi = "Bạn chưa thể gửi tin nhắn đến người này vì người này chặn không nhận tin nhắn từ người lạ.";
+  const r = await processOne(fakeApi({ sendMessage: async () => { throw new Error(loi); } }), { sdt: "0901234567" }, cfgNhanh);
+  assert.equal(r.tinNhan, "Lỗi");
+  assert.ok(!r.loiZalo);
+  assert.match(r.ghiChu, /tự gửi lại/);
+  const r2 = await processOne(fakeApi({ sendMessage: async () => { throw new Error("Tài khoản bị hạn chế"); } }), { sdt: "0901234567" }, cfgNhanh);
+  assert.ok(r2.loiZalo);
+});
 test("processOne: lời mời có {duan} {nhanvien}", async () => {
   let loiMoi = "";
   const api = fakeApi({ sendFriendRequest: async (m) => { loiMoi = m; } });

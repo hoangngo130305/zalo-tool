@@ -289,10 +289,15 @@ async function guiTin(api, row, cfg, attachments, user, result) {
   } catch (e) {
     result.tinNhan = "Lỗi";
     result.ghiChu = [result.ghiChu, `Tin nhắn: ${e.message}`].filter(Boolean).join(" | ");
-    result.loiZalo = true;
+    // Khách cài chặn tin từ người lạ: do cài đặt của khách, không phải Zalo hạn chế tài khoản -> không tính để tự dừng.
+    // Khi khách đồng ý kết bạn, tool tự gửi lại tin (Cài đặt → Chăm sóc tự động).
+    if (CHAN_NGUOI_LA.test(e.message)) result.ghiChu += " | Chờ khách đồng ý kết bạn rồi tool tự gửi lại";
+    else result.loiZalo = true;
   }
   return result;
 }
+
+const CHAN_NGUOI_LA = /người lạ/i;
 
 // ---------- gửi vào 1 nhóm ----------
 // job: { noiDung, attachments } dùng chung cho mọi nhóm trong đợt; nhóm có noiDung riêng thì dùng nội dung riêng
