@@ -248,3 +248,4 @@ details.hen summary { cursor: pointer; font-size: 13px; }
 .legend i.b-gui { background: var(--accent-soft); border: 1px solid var(--accent); }
 .legend i.b-ok { background: var(--ok); }
 .legend i.b-dy { background: var(--warn); border-radius: 50%; }
+.toolbar select { border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 13px; max-width: 260px; }
