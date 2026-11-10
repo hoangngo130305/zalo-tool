@@ -237,10 +237,11 @@ export async function processOne(api, row, cfg, attachments = []) {
     try {
       user = await api.findUser(row.sdt);
     } catch (e) {
-      // "User không hợp lệ": số này không có Zalo dùng được (bị khoá / huỷ) -> lỗi của riêng số đó, không tính để tự dừng
+      // Lỗi của riêng số đó, không tính để tự dừng: "User không hợp lệ" (Zalo bị khoá / huỷ),
+      // "Không tìm thấy" mã 212 (khách chặn tìm qua SĐT / không có Zalo)
       const ma = e.code ? ` (mã ${e.code})` : "";
-      return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: `Không tìm thấy Zalo: ${e.message}${ma}`,
-        loiZalo: !SO_KHONG_HOP_LE.test(e.message) };
+      const rieng = SO_KHONG_HOP_LE.test(e.message) || e.code === 212;
+      return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: `Không tìm thấy Zalo: ${e.message}${ma}`, loiZalo: !rieng };
     }
     if (!user?.uid) return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: "SĐT chưa đăng ký Zalo hoặc chặn tìm kiếm" };
   }
@@ -301,7 +302,7 @@ async function guiTin(api, row, cfg, attachments, user, result) {
 }
 
 const CHAN_NGUOI_LA = /người lạ/i;
-const SO_KHONG_HOP_LE = /không hợp lệ|invalid user/i;
+const SO_KHONG_HOP_LE = /không hợp lệ|invalid user|không tìm thấy|not found/i;
 
 // ---------- gửi vào 1 nhóm ----------
 // job: { noiDung, attachments } dùng chung cho mọi nhóm trong đợt; nhóm có noiDung riêng thì dùng nội dung riêng
