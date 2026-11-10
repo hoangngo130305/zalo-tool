@@ -788,7 +788,7 @@ def api_doi(request):
     tu_choi = set(KhongLienHe.objects.filter(sdt__in=[r.sdt for r in rows if r.sdt]).values_list("sdt", flat=True))
     return {
         "thanhVien": [{"id": x.id, "ten": str(x), "vaiTro": x.get_vai_tro_display()} for x in tv],
-        "thongKe": sv.thong_ke(qs)["nhanVien"],
+        "thongKe": [x for x in sv.thong_ke(qs)["nhanVien"] if x["id"] in tv_ids],     # chỉ người trong đội
         "rows": [{"id": r.id, "sdt": r.sdt_goc, "ten": r.ten, "duAn": r.du_an, "phuTrach": r.phu_trach_id,
                   "chienDich": r.chien_dich.ten if r.chien_dich_id else "",
                   "trangThai": "tu_choi" if r.sdt in tu_choi else ("so_sai" if not r.sdt else (

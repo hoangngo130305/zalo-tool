@@ -246,6 +246,7 @@ class DoiVaBaoCao(CoSo):
         r = c.get("/api/doi").json()
         self.assertEqual({x["id"] for x in r["thanhVien"]}, {self.tn.id, self.nv.id})
         self.assertNotIn(ngoai.id, [x["id"] for x in r["rows"]])
+        self.assertNotIn(self.nv2.id, [x["id"] for x in r["thongKe"]])     # không lộ tên người đội khác
         self.assertEqual(self.post(c, "/api/doi", {"ids": [ngoai.id], "nguoi": self.nv2.id}).status_code, 400)
         self.post(c, "/api/doi", {"chiaDeu": True})
         self.assertEqual(self.nv.nguoi_nhan.count(), 2)
