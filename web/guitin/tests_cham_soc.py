@@ -364,3 +364,49 @@ class BaoCaoEmail(CoSo):
         f = CaiDatForm(instance=self.cfg)
         f.cleaned_data = {"gmail_mat_khau": ""}
         self.assertEqual(f.clean_gmail_mat_khau(), "abcdabcdabcdabcd")
+
+
+class ThoiGianGuiRieng(CoSo):
+    """Quản trị cấp quyền thì nhân viên tự đặt thời gian chờ giữa 2 người / nghỉ sau mỗi lượt."""
+
+    def dat(self, c, **b):
+        return self.post(c, "/api/thoi-gian-cua-toi", b)
+
+    @mock.patch("guitin.worker.trang_thai", return_value=DANG_NHAP)
+    def test_cap_quyen_va_tu_cai(self, _tt):
+        c = self.client_cua(self.nv)
+        moi = {"choToiThieuGiay": 40, "choToiDaGiay": 90, "nghiSauSoLan": 5, "nghiPhut": 7}
+        self.assertEqual(self.dat(c, **moi).status_code, 403)               # chưa được cấp quyền
+        self.assertFalse(c.get("/api/state").json()["thoiGian"]["duocCai"])
+        NguoiDung.objects.filter(id=self.nv.id).update(tu_cai_thoi_gian=True)
+        self.assertEqual(self.dat(c, **{**moi, "choToiThieuGiay": 20}).status_code, 400)    # dưới 30 giây
+        self.assertEqual(self.dat(c, **{**moi, "choToiDaGiay": 35}).status_code, 400)       # tối đa < tối thiểu
+        r = self.dat(c, **moi)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["config"]["choToiThieuGiay"], 40)
+        self.nv.refresh_from_db()
+        g = cs.cfg_gui(self.nv, self.cfg)
+        self.assertEqual((g["choToiThieuGiay"], g["choToiDaGiay"], g["nghiSauSoLan"], g["nghiPhut"]), (40, 90, 5, 7))
+        self.assertEqual(sv.cau_hinh_cua(self.nv, nhom=True)["choToiThieuGiay"], 40)          # áp cho cả gửi nhóm
+        self.assertEqual(c.get("/api/state").json()["config"]["nghiPhut"], 7)              # dòng gợi ý trên trang
+        # Bỏ quyền: dùng lại cài đặt của quản trị dù vẫn còn giá trị riêng
+        NguoiDung.objects.filter(id=self.nv.id).update(tu_cai_thoi_gian=False)
+        self.nv.refresh_from_db()
+        self.assertEqual(cs.cfg_gui(self.nv, self.cfg)["choToiThieuGiay"], self.cfg.cho_toi_thieu_giay)
+        # Quay về mặc định
+        NguoiDung.objects.filter(id=self.nv.id).update(tu_cai_thoi_gian=True)
+        r = self.dat(c, macDinh=True).json()
+        self.assertIsNone(r["thoiGian"]["rieng"])
+        self.assertEqual(r["config"]["choToiThieuGiay"], self.cfg.cho_toi_thieu_giay)
+
+    @mock.patch("guitin.worker.trang_thai", return_value={**DANG_NHAP, "running": True})
+    def test_khong_doi_khi_dang_gui(self, _tt):
+        NguoiDung.objects.filter(id=self.nv.id).update(tu_cai_thoi_gian=True)
+        r = self.dat(self.client_cua(self.nv), choToiThieuGiay=40, choToiDaGiay=90, nghiSauSoLan=0, nghiPhut=1)
+        self.assertEqual(r.status_code, 400)
+
+    def test_quan_tri_cap_quyen_trong_trang_tai_khoan(self):
+        c = self.client_cua(self.admin)
+        t = c.get(f"/admin/guitin/nguoidung/{self.nv.id}/change/").content.decode()
+        self.assertIn("tu_cai_thoi_gian", t)
+        self.assertIn("Thời gian gửi riêng", t)

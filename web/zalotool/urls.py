@@ -24,6 +24,7 @@ urlpatterns = [
     path("api/contacts", v.api_contacts),
     path("api/tin-nhan-cua-toi", v.api_tin_nhan_cua_toi),
     path("api/loi-moi-cua-toi", v.api_loi_moi_cua_toi),
+    path("api/thoi-gian-cua-toi", v.api_thoi_gian_cua_toi),
     path("api/anh-cua-toi", v.api_anh_cua_toi),
     path("api/anh-cua-toi/xoa", v.api_anh_cua_toi_xoa),
     path("api/anh-cua-toi/<str:ten>", v.xem_anh_cua_toi),

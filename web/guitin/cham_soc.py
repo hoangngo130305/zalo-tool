@@ -26,7 +26,7 @@ def dong_gui(r, cfg, kieu="lan_dau", noi_dung=None, zalo_uid=""):
 def cfg_gui(u, cfg):
     # Ảnh gửi kèm: ảnh riêng của người bấm gửi, chưa có thì ảnh của quản trị.
     # conLaiHomNay: worker tự dừng khi đủ hạn mức hôm nay (lớp chặn thứ hai, cả khi đợt gửi kéo qua nửa đêm)
-    return {**cfg.to_dict(), "anh": sv.anh_gui_kem(u, cfg), "conLaiHomNay": sv.con_lai_hom_nay(u, cfg),
+    return {**sv.cau_hinh_cua(u, cfg), "anh": sv.anh_gui_kem(u, cfg), "conLaiHomNay": sv.con_lai_hom_nay(u, cfg),
             "hanMucNgay": sv.han_muc_ngay(u, cfg)}
 
 
@@ -70,7 +70,7 @@ def bat_dau_gui_nhom(u, bo_nhom=None, ghi_chu=""):
         worker.goi("POST", "/run-groups", {
             "uid": u.id, "dotId": dot.id, "groups": nhom, "noiDung": c.noi_dung,
             "anh": [f"anh-gui-nhom/{u.id}/{a}" for a in c.anh],
-            "cfg": CaiDat.lay().cfg_nhom(), "runBy": {"id": u.id, "name": str(u)},
+            "cfg": sv.cau_hinh_cua(u, nhom=True), "runBy": {"id": u.id, "name": str(u)},
         })
     except Exception:
         dot.delete()

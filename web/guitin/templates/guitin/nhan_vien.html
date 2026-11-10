@@ -141,6 +141,18 @@
               <p class="hint" style="margin:4px 0">Đến giờ tool tự bấm “Bắt đầu gửi” bằng Zalo của bạn (Zalo phải đang kết nối, không có đợt gửi khác).</p>
               <ul class="hen-list" id="henList"></ul>
             </details>
+            <details class="hen hidden" id="tgBox">
+              <summary><b>Thời gian gửi của tôi</b> <span class="count" id="tgDang"></span></summary>
+              <div class="hen-form">
+                <label>Chờ tối thiểu (giây)<input type="number" id="tgMin" min="30" max="3600"></label>
+                <label>Chờ tối đa (giây)<input type="number" id="tgMax" min="30" max="3600"></label>
+                <label>Nghỉ sau mỗi (lần gửi)<input type="number" id="tgSau" min="0" max="1000"></label>
+                <label>Thời gian nghỉ (phút)<input type="number" id="tgPhut" min="1" max="240"></label>
+                <button class="btn sm primary" type="button" id="btnTgLuu">Lưu</button>
+                <button class="btn sm" type="button" id="btnTgMacDinh">Dùng của quản trị</button>
+              </div>
+              <p class="hint" id="tgHint" style="margin:4px 0"></p>
+            </details>
             <div class="confirm hidden" id="confirmBox">
               <div id="confirmText"></div>
               <div class="row">

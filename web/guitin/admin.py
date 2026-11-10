@@ -36,7 +36,7 @@ class NguoiDungAdmin(UserAdmin):
     add_form = TaoTaiKhoanForm
     ordering = ("vai_tro", "ho_ten")
     list_display = ("ho_ten", "email", "vai_tro_pill", "doi", "so_duoc_giao", "tam_dung", "is_active", "last_login")
-    list_filter = ("vai_tro", "doi", "is_active")
+    list_filter = ("vai_tro", "doi", "is_active", "tu_cai_thoi_gian")
     search_fields = ("email", "ho_ten")
     fieldsets = (
         ("Thông tin", {"fields": ("email", "ho_ten", "password", "so_dien_thoai")}),
@@ -44,6 +44,9 @@ class NguoiDungAdmin(UserAdmin):
         ("Giới hạn & tạm dừng gửi", {"fields": ("gioi_han_ngay", "tam_dung_den"),
                                      "description": "Bỏ tạm dừng: xoá trống ô “Tạm dừng gửi đến” rồi Lưu, hoặc ở danh sách Tài khoản "
                                                     "tick tài khoản → chọn thao tác “Bỏ tạm dừng gửi”."}),
+        ("Thời gian gửi riêng", {"fields": ("tu_cai_thoi_gian", "cho_toi_thieu_giay", "cho_toi_da_giay", "nghi_sau_so_lan", "nghi_phut"),
+                                 "description": "Tick “Được tự cài thời gian gửi” để nhân viên tự đặt trên trang gửi tin (khung “Thời gian gửi của tôi”). "
+                                                "Các ô để trống = theo Cài đặt gửi tin. Bỏ tick thì luôn dùng Cài đặt gửi tin."}),
         ("Phân quyền", {"fields": ("vai_tro", "doi", "is_active"),
                         "description": "Quản trị: toàn quyền, vào được trang này. Trưởng nhóm: dùng trang gửi tin như nhân viên, "
                                        "thêm trang “Đội của tôi” để xem và giao số cho nhân viên cùng đội (cùng tên đội). "
@@ -94,6 +97,7 @@ class NguoiDungAdmin(UserAdmin):
             messages.error(request, "Không thể tự hạ quyền hoặc tự khoá tài khoản đang dùng. Thay đổi vai trò / trạng thái không được lưu.")
             obj.vai_tro, obj.is_active = NguoiDung.QUAN_TRI, True
         super().save_model(request, obj, form, change)
+        sv.tang_phien_ban([obj.id])     # trang gửi tin của người này tải lại (quyền / thời gian gửi riêng)
         sv.ghi_log(f"{request.user} đã {'cập nhật' if change else 'tạo'} tài khoản {obj.email} ({obj.get_vai_tro_display()}).",
                    nguoi_dung=request.user)
 

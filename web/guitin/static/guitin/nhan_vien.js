@@ -17,6 +17,7 @@ let version = null;       // phiên bản danh sách trên server
 let lastLogId = 0;
 let listDirty = false;    // có thay đổi chưa lưu -> không tải đè
 let hanMuc = null;        // { daGui, toiDa, tamDungDen } hạn mức hôm nay của Zalo của tôi
+let thoiGian = null;      // { duocCai, rieng, macDinh } thời gian gửi riêng (quản trị cấp quyền mới tự cài được)
 
 // ---------- tiện ích ----------
 // normalizePhone, cacMau, fill, thanhCong, docDongDan: dùng chung với server (chung.js)
@@ -231,6 +232,7 @@ async function reloadContacts() {
     if (!myDirty && r.tinNhanCuaToi !== undefined) { myDefault = r.tinNhanCuaToi; if (document.activeElement !== $("myMsg")) $("myMsg").value = myDefault; }
     if (!inviteDirty && r.loiMoiCuaToi !== undefined) { myInvite = r.loiMoiCuaToi; if (document.activeElement !== $("myInvite")) $("myInvite").value = myInvite; }
     if (r.anhCuaToi && !imgBusy && seq === imgSeq) { myImages = r.anhCuaToi; renderMyImages(); }
+    if (r.thoiGian && !document.activeElement?.closest?.("#tgBox")) { thoiGian = r.thoiGian; renderThoiGian(); }
     const focused = document.activeElement?.closest?.("#tbody");
     napThem(r);
     renderHen();
@@ -374,6 +376,37 @@ $("fileInput").onchange = async () => {
     addMany(r.rows);
   } catch (e) { showError(e); }
 };
+
+// ---------- thời gian gửi của tôi (quản trị cấp quyền) ----------
+function renderThoiGian() {
+  $("tgBox").classList.toggle("hidden", !thoiGian?.duocCai);
+  if (!thoiGian?.duocCai) return;
+  const m = thoiGian.macDinh;
+  const r = thoiGian.rieng || {};
+  const v = (k) => r[k] ?? m[k];
+  $("tgMin").value = v("choToiThieuGiay");
+  $("tgMax").value = v("choToiDaGiay");
+  $("tgSau").value = v("nghiSauSoLan");
+  $("tgPhut").value = v("nghiPhut");
+  $("tgDang").textContent = thoiGian.rieng ? "· đang dùng của tôi" : "· đang dùng của quản trị";
+  $("btnTgMacDinh").classList.toggle("hidden", !thoiGian.rieng);
+  $("tgHint").textContent = `Quản trị đặt: chờ ${m.choToiThieuGiay}–${m.choToiDaGiay} giây giữa 2 người`
+    + (m.nghiSauSoLan ? `, nghỉ ${m.nghiPhut} phút sau mỗi ${m.nghiSauSoLan} lần.` : ", không nghỉ.")
+    + " Tối thiểu 30 giây; chờ càng ngắn càng dễ bị Zalo hạn chế tài khoản. Nghỉ sau mỗi = 0 là không nghỉ.";
+}
+async function luuThoiGian(body) {
+  try {
+    const r = await api("/api/thoi-gian-cua-toi", body);
+    thoiGian = r.thoiGian;
+    config = r.config;
+    renderThoiGian();
+    renderState();
+  } catch (e) { showError(e); }
+}
+$("btnTgLuu").onclick = () => luuThoiGian({
+  choToiThieuGiay: $("tgMin").value, choToiDaGiay: $("tgMax").value, nghiSauSoLan: $("tgSau").value, nghiPhut: $("tgPhut").value || 1,
+});
+$("btnTgMacDinh").onclick = () => luuThoiGian({ macDinh: true });
 
 // ---------- tin nhắn gửi hàng loạt của tôi ----------
 let myDirty = false;
@@ -857,6 +890,8 @@ async function poll() {
     setDoneFrom(s.contacts);
     st = s;
     hanMuc = s.hanMuc || null;
+    thoiGian = s.thoiGian || null;
+    renderThoiGian();
     version = s.version;
     s.logs.forEach(addLog);
     renderTable();

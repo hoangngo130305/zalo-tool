@@ -179,6 +179,19 @@ class NguoiDung(AbstractUser):
     tam_dung_den = models.DateTimeField(
         "Tạm dừng gửi đến", null=True, blank=True,
         help_text="Tool tự đặt khi gặp nhiều lỗi liên tiếp (có thể Zalo đang hạn chế tài khoản). Xoá ô này để cho gửi lại ngay.")
+    # Thời gian gửi riêng: quản trị cấp quyền thì nhân viên tự cài trên trang gửi tin (để trống = theo Cài đặt gửi tin)
+    tu_cai_thoi_gian = models.BooleanField(
+        "Được tự cài thời gian gửi", default=False,
+        help_text="Cho nhân viên tự đặt thời gian chờ giữa 2 người và thời gian nghỉ sau mỗi lượt trên trang gửi tin "
+                  "(vẫn tối thiểu 30 giây giữa 2 người).")
+    cho_toi_thieu_giay = models.PositiveIntegerField("Chờ tối thiểu (giây)", null=True, blank=True,
+                                                     validators=[MinValueValidator(30), MaxValueValidator(3600)])
+    cho_toi_da_giay = models.PositiveIntegerField("Chờ tối đa (giây)", null=True, blank=True,
+                                                  validators=[MinValueValidator(30), MaxValueValidator(3600)])
+    nghi_sau_so_lan = models.PositiveSmallIntegerField("Nghỉ sau mỗi (lần gửi)", null=True, blank=True,
+                                                       validators=[MaxValueValidator(1000)], help_text="0 = không nghỉ.")
+    nghi_phut = models.PositiveSmallIntegerField("Thời gian nghỉ (phút)", null=True, blank=True,
+                                                 validators=[MinValueValidator(1), MaxValueValidator(240)])
     so_dien_thoai = models.CharField("SĐT của nhân viên", max_length=20, blank=True,
                                      help_text="Dùng cho {sdt_nhanvien} trong tin nhắn / lời mời.")
     doi = models.CharField("Đội", max_length=100, blank=True, db_index=True,
@@ -217,6 +230,25 @@ class NguoiDung(AbstractUser):
         if q == "export" and self.vai_tro in (self.NHAN_VIEN, self.TRUONG_NHOM):
             return CaiDat.lay().nhan_vien_xuat_excel
         return True
+
+    def clean(self):
+        super().clean()
+        if self.cho_toi_thieu_giay and self.cho_toi_da_giay and self.cho_toi_da_giay < self.cho_toi_thieu_giay:
+            raise ValidationError({"cho_toi_da_giay": "Phải lớn hơn hoặc bằng thời gian chờ tối thiểu."})
+
+    def thoi_gian_rieng(self):
+        """Thời gian gửi riêng (khoá như CaiDat.to_dict) đè lên cài đặt chung; {} nếu chưa được cấp quyền / chưa đặt."""
+        if not self.tu_cai_thoi_gian:
+            return {}
+        d = {}
+        if self.cho_toi_thieu_giay:
+            d["choToiThieuGiay"] = self.cho_toi_thieu_giay
+            d["choToiDaGiay"] = max(self.cho_toi_da_giay or self.cho_toi_thieu_giay, self.cho_toi_thieu_giay)
+        if self.nghi_sau_so_lan is not None:
+            d["nghiSauSoLan"] = self.nghi_sau_so_lan
+            if self.nghi_phut:
+                d["nghiPhut"] = self.nghi_phut
+        return d
 
     def thanh_vien_doi(self):
         """Trưởng nhóm: các tài khoản cùng đội (kể cả chính mình); người khác: chỉ mình."""

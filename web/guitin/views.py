@@ -115,6 +115,16 @@ def han_muc_cho(user):
             "tamDungDen": localtime(tam).strftime("%H:%M %d/%m") if tam else None}
 
 
+def thoi_gian_cho(user):
+    """Thời gian gửi riêng trên trang gửi tin: có được tự cài không, giá trị riêng (None = theo quản trị), mặc định của quản trị."""
+    c = CaiDat.lay()
+    rieng = {"choToiThieuGiay": user.cho_toi_thieu_giay, "choToiDaGiay": user.cho_toi_da_giay,
+             "nghiSauSoLan": user.nghi_sau_so_lan, "nghiPhut": user.nghi_phut}
+    return {"duocCai": user.tu_cai_thoi_gian, "rieng": rieng if any(v is not None for v in rieng.values()) else None,
+            "macDinh": {"choToiThieuGiay": c.cho_toi_thieu_giay, "choToiDaGiay": c.cho_toi_da_giay,
+                        "nghiSauSoLan": c.nghi_sau_so_lan, "nghiPhut": c.nghi_phut}}
+
+
 def nhat_ky_cho(user):
     """Nhân viên chỉ thấy nhật ký của mình (thao tác của mình và các đợt gửi mình bấm)."""
     qs = NhatKy.objects.all()
@@ -148,7 +158,8 @@ def api_state(request):
     logs = list(nhat_ky_cho(request.user).order_by("-id")[:300])
     return {
         **trang_thai_cho(request.user),
-        "config": CaiDat.lay().to_dict(),
+        "config": sv.cau_hinh_cua(request.user),
+        "thoiGian": thoi_gian_cho(request.user),
         "tinNhanCuaToi": request.user.tin_nhan_mac_dinh,
         "loiMoiCuaToi": request.user.loi_moi_ket_ban,
         "anhCuaToi": request.user.anh_tin_nhan,
@@ -196,7 +207,8 @@ def api_contacts(request):
         if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
             raise ValueError("Dữ liệu không hợp lệ")
         ket_qua_luu = sv.luu_danh_sach(request.user, rows)
-    return {"contacts": sv.danh_sach(request.user), "luu": ket_qua_luu, "staff": staff_cho(request.user), "config": CaiDat.lay().to_dict(),
+    return {"contacts": sv.danh_sach(request.user), "luu": ket_qua_luu, "staff": staff_cho(request.user), "config": sv.cau_hinh_cua(request.user),
+            "thoiGian": thoi_gian_cho(request.user),
             "tinNhanCuaToi": request.user.tin_nhan_mac_dinh, "loiMoiCuaToi": request.user.loi_moi_ket_ban,
             "anhCuaToi": request.user.anh_tin_nhan, **thong_tin_them(request.user), "version": sv.phien_ban(request.user)}
 
@@ -261,6 +273,40 @@ def api_tin_nhan_cua_toi(request):
     u.save(update_fields=["tin_nhan_mac_dinh"])
     sv.tang_phien_ban()
     return {"tinNhanCuaToi": u.tin_nhan_mac_dinh, "version": sv.phien_ban(request.user)}
+
+
+@api("send", ["POST"])
+def api_thoi_gian_cua_toi(request):
+    """Nhân viên được quản trị cấp quyền tự đặt thời gian chờ giữa 2 người / nghỉ sau mỗi lượt.
+    {macDinh: true} = quay về cài đặt của quản trị."""
+    u = request.user
+    if not u.tu_cai_thoi_gian:
+        return JsonResponse({"error": "Quản trị chưa cho tài khoản của bạn tự cài thời gian gửi"}, status=403)
+    can_khong_dang_gui(u)
+    b = request.json
+    if b.get("macDinh"):
+        u.cho_toi_thieu_giay = u.cho_toi_da_giay = u.nghi_sau_so_lan = u.nghi_phut = None
+    else:
+        def so(k, nho, lon):
+            try:
+                v = int(b.get(k))
+            except (TypeError, ValueError):
+                raise ValueError("Hãy nhập số") from None
+            if not nho <= v <= lon:
+                raise ValueError(f"Giá trị phải từ {nho} đến {lon}")
+            return v
+        u.cho_toi_thieu_giay = so("choToiThieuGiay", 30, 3600)
+        u.cho_toi_da_giay = so("choToiDaGiay", 30, 3600)
+        if u.cho_toi_da_giay < u.cho_toi_thieu_giay:
+            raise ValueError("Chờ tối đa phải lớn hơn hoặc bằng chờ tối thiểu")
+        u.nghi_sau_so_lan = so("nghiSauSoLan", 0, 1000)
+        u.nghi_phut = so("nghiPhut", 1, 240) if u.nghi_sau_so_lan else None
+    u.save(update_fields=["cho_toi_thieu_giay", "cho_toi_da_giay", "nghi_sau_so_lan", "nghi_phut"])
+    tg = u.thoi_gian_rieng()
+    sv.ghi_log(f"{u} đặt thời gian gửi riêng: " + (
+        f"chờ {tg['choToiThieuGiay']}–{tg['choToiDaGiay']} giây" if tg.get("choToiThieuGiay") else "theo quản trị")
+        + (f", nghỉ {tg['nghiPhut']} phút sau mỗi {tg['nghiSauSoLan']} lần" if tg.get("nghiSauSoLan") else "") + ".", nguoi_dung=u)
+    return {"thoiGian": thoi_gian_cho(u), "config": sv.cau_hinh_cua(u)}
 
 
 @api("send", ["POST"])
@@ -603,7 +649,7 @@ def api_nhom_state(request):
     u = request.user
     c = CauHinhNhom.cua(u)
     logs = list(nhat_ky_cho(u).filter(nguoi_dung=u).order_by("-id")[:200])
-    return {**trang_thai_cho(u), "config": CaiDat.lay().to_dict(), "cfgNhom": CaiDat.lay().cfg_nhom(),
+    return {**trang_thai_cho(u), "config": sv.cau_hinh_cua(u), "cfgNhom": sv.cau_hinh_cua(u, nhom=True),
             "cauHinh": sv.cau_hinh_nhom_dict(c), "anhToiDa": sv.ANH_TOI_DA, "anhToiDaMb": sv.ANH_TOI_DA_MB,
             "boNhom": [cs.bo_nhom_dict(x) for x in u.bo_nhom.all()],
             "lichHen": [cs.lich_hen_dict(lh) for lh in u.lich_hen.filter(loai=LichHen.NHOM).select_related("bo_nhom")

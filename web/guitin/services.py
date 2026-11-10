@@ -882,6 +882,12 @@ def xoa_anh_nv(user, ten):
     (thu_muc_anh_nv(user) / ten).unlink(missing_ok=True)
 
 
+def cau_hinh_cua(u, cfg=None, nhom=False):
+    """Cấu hình gửi của u: Cài đặt gửi tin (hoặc của gửi nhóm), đè thời gian chờ / nghỉ riêng nếu quản trị cho u tự cài."""
+    cfg = cfg or CaiDat.lay()
+    return {**(cfg.cfg_nhom() if nhom else cfg.to_dict()), **u.thoi_gian_rieng()}
+
+
 def anh_gui_kem(user, cfg):
     """Ảnh gửi kèm tin nhắn khi user bấm gửi: ảnh riêng của user, chưa có thì ảnh của quản trị (đường dẫn trong data/)."""
     if user.anh_tin_nhan:
