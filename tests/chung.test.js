@@ -97,6 +97,13 @@ test("processOne: khách chặn tin từ người lạ không tính là lỗi c�
   const r2 = await processOne(fakeApi({ sendMessage: async () => { throw new Error("Tài khoản bị hạn chế"); } }), { sdt: "0901234567" }, cfgNhanh);
   assert.ok(r2.loiZalo);
 });
+test("processOne: số có Zalo không hợp lệ (bị khoá / huỷ) không tính là lỗi của Zalo", async () => {
+  const r = await processOne(fakeApi({ findUser: async () => { throw Object.assign(new Error("User không hợp lệ"), { code: 1 }); } }),
+    { sdt: "0901234567" }, cfgNhanh);
+  assert.equal(r.tinNhan, "Lỗi");
+  assert.ok(!r.loiZalo);
+  assert.match(r.ghiChu, /mã 1/);
+});
 test("processOne: lời mời có {duan} {nhanvien}", async () => {
   let loiMoi = "";
   const api = fakeApi({ sendFriendRequest: async (m) => { loiMoi = m; } });

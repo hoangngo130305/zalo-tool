@@ -237,7 +237,10 @@ export async function processOne(api, row, cfg, attachments = []) {
     try {
       user = await api.findUser(row.sdt);
     } catch (e) {
-      return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: `Không tìm thấy Zalo: ${e.message}`, loiZalo: true };
+      // "User không hợp lệ": số này không có Zalo dùng được (bị khoá / huỷ) -> lỗi của riêng số đó, không tính để tự dừng
+      const ma = e.code ? ` (mã ${e.code})` : "";
+      return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: `Không tìm thấy Zalo: ${e.message}${ma}`,
+        loiZalo: !SO_KHONG_HOP_LE.test(e.message) };
     }
     if (!user?.uid) return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: "SĐT chưa đăng ký Zalo hoặc chặn tìm kiếm" };
   }
@@ -298,6 +301,7 @@ async function guiTin(api, row, cfg, attachments, user, result) {
 }
 
 const CHAN_NGUOI_LA = /người lạ/i;
+const SO_KHONG_HOP_LE = /không hợp lệ|invalid user/i;
 
 // ---------- gửi vào 1 nhóm ----------
 // job: { noiDung, attachments } dùng chung cho mọi nhóm trong đợt; nhóm có noiDung riêng thì dùng nội dung riêng
