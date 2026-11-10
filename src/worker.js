@@ -18,7 +18,7 @@ const PORT = Number(process.env.ZALO_WORKER_PORT || conf.worker?.port) || 3100;
 const TOKEN = String(conf.worker?.token || "");
 const DJANGO = `http://127.0.0.1:${Number(process.env.ZALO_TOOL_PORT || conf.django?.port) || 8000}`;
 if (TOKEN.length < 32) {
-  console.error("Thiếu worker.token trong config.json. Chạy chay-web.bat (Django sẽ tự tạo) rồi mở lại.");
+  console.error("Thiếu worker.token trong config.json. Chạy web Django một lần (tự tạo token) rồi mở lại.");
   process.exit(1);
 }
 

@@ -28,7 +28,7 @@
 {% block content %}
 <div id="zt" data-me="{{ me_id }}" data-zalo="{{ co_quyen_zalo|yesno:'1,' }}" data-gui="{{ co_quyen_gui|yesno:'1,' }}">
   <div class="alert alert-danger d-none" id="ztWorker">
-    <i class="fas fa-exclamation-triangle"></i> Zalo worker chưa chạy nên chưa gửi được tin. Kiểm tra cửa sổ “Zalo worker” (mở bằng chay-web.bat) còn mở không.
+    <i class="fas fa-exclamation-triangle"></i> Zalo worker chưa chạy nên chưa gửi được tin. Kiểm tra dịch vụ zalo-tool-worker (trên máy chủ) hoặc cửa sổ chạy <code>node src\worker.js</code> (máy cá nhân), xem thêm trang Tình trạng hệ thống.
   </div>
 
   <!-- Số liệu tổng -->

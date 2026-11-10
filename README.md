@@ -10,15 +10,29 @@ Gồm 2 phần chạy cùng nhau trên một máy:
 ## Cài đặt (1 lần)
 1. Cài **Node.js**, **Python 3.12+** và **XAMPP**.
 2. Mở **XAMPP Control Panel**, bấm **Start** ở dòng **MySQL**.
-3. Double-click **`cai-dat.bat`**. Tool tự cài thư viện, tạo database `zalo_tool`, nhập dữ liệu từ bản cũ,
-   và hỏi tạo tài khoản quản trị nếu chưa có.
+3. Mở cửa sổ lệnh (CMD) tại thư mục tool, chạy lần lượt:
+   ```
+   npm install
+   python -m venv .venv
+   .venv\Scripts\python -m pip install -r requirements.txt
+   .venv\Scripts\python web\manage.py migrate
+   .venv\Scripts\python web\manage.py collectstatic --noinput
+   .venv\Scripts\python web\manage.py createsuperuser
+   ```
 
 Kết nối MySQL nằm trong `config.json` (mặc định XAMPP: user `root`, không mật khẩu). Các mục
 `djangoSecretKey` và `worker.token` được tự tạo, không cần sửa và không chia sẻ cho ai.
 
 ## Sử dụng
-Bật MySQL trong XAMPP, rồi double-click **`chay-web.bat`**. Trình duyệt tự mở `http://localhost:8000`.
-Giữ cửa sổ “Zalo Tool” mở trong lúc dùng (cửa sổ “Zalo worker” được thu nhỏ bên dưới).
+Bật MySQL trong XAMPP, mở 2 cửa sổ lệnh tại thư mục tool:
+```
+node src\worker.js                     (cửa sổ 1: Zalo worker)
+set PYTHONUTF8=1
+.venv\Scripts\python web\run.py        (cửa sổ 2: web, tự mở http://localhost:8000)
+```
+Giữ cả 2 cửa sổ mở trong lúc dùng. Sửa file trong `web/guitin/static/` thì chạy lại `collectstatic` rồi bật lại web.
+Trên server, web / worker / lịch chạy bằng dịch vụ hệ thống (`zalo-tool-web`, `zalo-tool-worker`, `zalo-tool-lich`),
+xem tai-lieu/Tai-lieu-ky-thuat-Zalo-Tool.docx.
 Mọi người đăng nhập cùng một địa chỉ, tool tự đưa về đúng giao diện theo vai trò:
 
 | Vai trò | Giao diện | Làm gì |
@@ -148,7 +162,7 @@ Chạy thử worker thật mà không cần Zalo: `node --import ./tests/zalo-gi
   .venv\Scripts\python web\manage.py tao_admin --email <email> --password <mật khẩu mới>
   ```
 - Muốn nhân viên dùng từ máy khác cùng mạng: đặt `"moChoMangNoiBo": true` trong `config.json`,
-  chạy lại `chay-web.bat`, gửi địa chỉ `http://<IP máy>:8000` hiện trong cửa sổ cho nhân viên.
+  bật lại web, gửi địa chỉ `http://<IP máy>:8000` hiện trong cửa sổ cho nhân viên.
   Khi đó nên đặt mật khẩu cho MySQL.
 
 ## Dữ liệu

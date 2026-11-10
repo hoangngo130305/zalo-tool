@@ -10,7 +10,7 @@ class WorkerLoi(Exception):
     pass
 
 
-CHUA_CHAY = "Zalo worker chưa chạy. Kiểm tra cửa sổ \"Zalo worker\" (mở bằng chay-web.bat) còn mở không."
+CHUA_CHAY = "Zalo worker chưa chạy nên chưa gửi được. Báo quản trị kiểm tra phần gửi Zalo (zalo-tool-worker) trên máy chủ."
 
 
 def goi(method, path, body=None, timeout=8):

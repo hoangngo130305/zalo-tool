@@ -22,3 +22,9 @@ data/cho-bao-cao.jsonl*
 # Tool tự tạo khi chạy
 data/chay-lich.txt
 data/tam-nhap/
+
+# Dữ liệu khách thật / kết quả gửi thật: không đưa lên git
+tai-lieu/palm city.xls
+tai-lieu/Spam tesst.xlsx
+tai-lieu/Test-case-Zalo-Tool.xlsx
+~$*
