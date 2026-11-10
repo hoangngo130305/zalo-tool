@@ -14,7 +14,7 @@
     else if (p.startsWith("84") && (p.length === 11 || p.length === 12)) p = "0" + p.slice(2);
     else if ((p.length === 9 || p.length === 10) && !p.startsWith("0")) p = "0" + p;
     if (p.length === 11 && DAU_SO_CU[p.slice(0, 4)]) p = DAU_SO_CU[p.slice(0, 4)] + p.slice(4);
-    return /^0\d{9}$/.test(p) ? p : null;
+    return /^0[35789]\d{8}$/.test(p) ? p : null;     // chỉ đầu số di động: số bàn không có Zalo
   }
   // Nhiều mẫu cách nhau bằng dòng "---": mỗi khách nhận ngẫu nhiên 1 mẫu (worker chọn khi gửi)
   const cacMau = (t) => String(t ?? "").split(/^\s*-{3,}\s*$/m).map((s) => s.trim()).filter(Boolean);

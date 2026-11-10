@@ -61,6 +61,16 @@ class DocDuLieu(TestCase):
         self.assertEqual(tach_sdt("0901234567 - 0912345678"), ["0901234567", "0912345678"])
         self.assertEqual(tach_sdt("09012345670912345678"), ["0901234567", "0912345678"])
         self.assertEqual(tach_sdt("02838123456"), [])          # số bàn 11 chữ số: không cắt nhầm
+        # các kiểu ghi hay gặp trong file khách gửi (số giả)
+        self.assertEqual(tach_sdt("0901111111-0902  222 222"), ["0901111111", "0902222222"])
+        self.assertEqual(tach_sdt("0903 333 333\n04 3123 4567"), ["0903333333"])
+        self.assertEqual(tach_sdt("0904 444 444 (anh Nam)\n0905 555 555"), ["0904444444", "0905555555"])
+        self.assertEqual(tach_sdt("0906 666 666 / 01631 234 567"), ["0906666666", "0331234567"])
+        self.assertEqual(tach_sdt("01271 234 567"), ["0811234567"])
+        self.assertEqual(tach_sdt("84 912 345 678"), ["0912345678"])
+        self.assertEqual(tach_sdt("+84 912 345 678 - 0987 654 321"), ["0912345678", "0987654321"])
+        for sai in ("3812 3456", "065 12345678", "X", "", None):
+            self.assertEqual(tach_sdt(sai), [], sai)
 
     def test_xao(self):
         for _ in range(20):

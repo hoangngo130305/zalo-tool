@@ -46,20 +46,43 @@ def chuan_hoa_sdt(raw):
         p = "0" + p
     if len(p) == 11 and p[:4] in DAU_SO_CU:
         p = DAU_SO_CU[p[:4]] + p[4:]
-    return p if re.fullmatch(r"0\d{9}", p) else None
+    # Chỉ nhận đầu số di động (03, 05, 07, 08, 09): số bàn (02x, số bàn cũ 04 / 08 / 06x...) không có Zalo,
+    # đem đi tìm chỉ tốn lượt tìm số mà Zalo giới hạn mỗi giờ
+    return p if re.fullmatch(r"0[35789]\d{8}", p) else None
 
 
 def tach_sdt(raw):
-    """Lấy các SĐT hợp lệ trong 1 ô (ô có thể ghi nhiều số: "090.. - 091..", "090../091..", xuống dòng,
-    hoặc 2 số dính liền nhau). Trả về danh sách SĐT đã chuẩn hoá, giữ thứ tự, không trùng."""
-    s = str(raw or "")
+    """Lấy các SĐT hợp lệ trong 1 ô (ô có thể ghi nhiều số: "090.. - 091..", "090../091..", "0901111111-0902 222 222",
+    xuống dòng, số viết cách "0902  222 222", hoặc 2 số dính liền nhau). Trả về danh sách SĐT đã chuẩn hoá, giữ thứ tự,
+    không trùng."""
     out = []
-    for part in re.split(r"[/;,|\n\r]+|\s[-–]\s|\s{2,}|hoặc|hoac|or", s, flags=re.IGNORECASE):
+
+    def them(q):
+        if q and q not in out:
+            out.append(q)
+
+    for part in re.split(r"[/;,|\n\r]+|hoặc|hoac|\bor\b", str(raw or ""), flags=re.IGNORECASE):
         p = chuan_hoa_sdt(part)
-        found = [p] if p else _tach_so_dinh_lien(re.sub(r"\D", "", part))
-        for q in found:
-            if q not in out:
-                out.append(q)
+        if p:
+            them(p)
+            continue
+        # Ghép dần các cụm chữ số cho đủ 1 số (số viết cách, 2 số nối bằng "-" hoặc khoảng trắng)
+        buf = ""
+        for cum in re.findall(r"\+?\d+", part):
+            if not buf and len(cum.lstrip("+")) > 12:
+                for q in _tach_so_dinh_lien(cum.lstrip("+")):
+                    them(q)
+                continue
+            buf += cum
+            d = buf.lstrip("+")
+            if (d.startswith("0") and len(d) in (10, 11)) or (d.startswith("84") and len(d) == 11):
+                q = chuan_hoa_sdt(buf)
+                if q:
+                    them(q)
+                    buf = ""
+                    continue
+            if len(d) >= 11:
+                buf = ""
     return out
 
 
