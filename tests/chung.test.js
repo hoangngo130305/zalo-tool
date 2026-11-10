@@ -110,6 +110,12 @@ test("processOne: Zalo báo 'Không tìm thấy' (mã 212, khách chặn tìm qu
   assert.ok(!r.loiZalo);
   assert.match(r.ghiChu, /mã 212/);
 });
+test("processOne: phiên Zalo hết hiệu lực (mã 600) -> báo phienHetHan, không tính là lỗi của khách", async () => {
+  const r = await processOne(fakeApi({ findUser: async () => { throw Object.assign(new Error("zpw_sek bị thiếu hoặc không đúng"), { code: 600 }); } }),
+    { sdt: "0901234567" }, cfgNhanh);
+  assert.ok(r.phienHetHan);
+  assert.ok(!r.loiZalo);
+});
 test("processOne: Zalo giới hạn tìm số vẫn tính là lỗi của Zalo (để tự dừng)", async () => {
   const loi = "Tìm số điện thoại quá nhiều lần trong 1 giờ có thể bị xem là hoạt động bất thường. Bạn hãy thử lại vào 12:00.";
   const r = await processOne(fakeApi({ findUser: async () => { throw Object.assign(new Error(loi), { code: 221 }); } }),

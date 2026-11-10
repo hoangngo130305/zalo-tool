@@ -1,5 +1,5 @@
 // Zalo giả cho test đầu-cuối (thay thư viện zca-js khi chạy worker với --import ./tests/zalo-gia/dang-ky.mjs).
-// Theo SĐT: đuôi 99 -> Zalo báo lỗi (như khi bị giới hạn tìm số), đuôi 88 -> chưa đăng ký Zalo, đuôi 77 -> khách chặn
+// Theo SĐT: đuôi 99 -> Zalo báo lỗi (như khi bị giới hạn tìm số), đuôi 66 -> phiên Zalo hết hiệu lực (mã 600), đuôi 88 -> chưa đăng ký Zalo, đuôi 77 -> khách chặn
 // tin từ người lạ (gửi tin lỗi cho tới khi đồng ý kết bạn), còn lại -> gửi được.
 // Mọi lời mời / tin nhắn "đã gửi" được ghi vào data/zalo-gia-da-gui.jsonl để test kiểm tra.
 // Test giả lập khách đồng ý kết bạn / nhắn tin bằng cách ghi 1 dòng vào data/zalo-gia-su-kien.jsonl:
@@ -48,6 +48,7 @@ function api() {
     fetchAccountInfo: async () => ({ profile: { displayName: "Zalo giả" } }),
     findUser: async (phone) => {
       if (phone.endsWith("99")) throw new Error("Zalo giả: vượt giới hạn tìm kiếm");
+      if (phone.endsWith("66")) throw Object.assign(new Error("zpw_sek bị thiếu hoặc không đúng"), { code: 600 });
       if (phone.endsWith("88")) return {};
       return { uid: `u${phone}`, display_name: `KH ${phone}` };
     },

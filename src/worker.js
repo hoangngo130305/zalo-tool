@@ -313,6 +313,15 @@ function launch(a, { kind, items, cfg, runBy, task, label, keyOf, onResult, dotI
       Object.assign(a, { current: null, progress: { i: i + 1, total: n } });
       a.lastSendAt = Date.now();
       if (kind === "ca-nhan") a.pending = a.pending.filter((s) => s !== row.sdt);
+      if (res.phienHetHan) {
+        // Không ghi kết quả (khách vẫn còn trong danh sách chờ), không tính lỗi liên tiếp / tạm dừng 24 giờ
+        a.stopRequested = true;
+        a.canQuetLai = true;
+        log(a, `Phiên Zalo ${a.account} đã hết hiệu lực (thường do đăng nhập Zalo Web / Zalo PC ở nơi khác). `
+          + `Đã dừng đợt gửi; ${keyOf(row)} chưa bị tính là đã gửi. Hãy kết nối Zalo (quét QR) lại rồi gửi tiếp.`, "error");
+        notify(`phiên Zalo ${a.account} (tài khoản #${a.uid}) đã hết hiệu lực, cần quét QR lại.`);
+        return;
+      }
       const { loiZalo, ...ketQua } = res;
       await onResult(row, ketQua);
       // Zalo báo lỗi nhiều lần liền (thường do bị hạn chế): tự dừng để tài khoản không bị phạt nặng hơn
@@ -345,10 +354,16 @@ function launch(a, { kind, items, cfg, runBy, task, label, keyOf, onResult, dotI
       log(a, `Lỗi khi gửi: ${e.message}`, "error");
       if (dotId) report("dot_ket_thuc", { dotId, trangThai: "gian_doan", daGui: a.progress?.i ?? 0 });
     })
-    .finally(() => Object.assign(a, {
-      running: false, kind: null, runBy: null, stopRequested: false, current: null, waitUntil: null, waitBreak: false,
-      pending: [], dotId: null,
-    }));
+    .finally(() => {
+      Object.assign(a, {
+        running: false, kind: null, runBy: null, stopRequested: false, current: null, waitUntil: null, waitBreak: false,
+        pending: [], dotId: null,
+      });
+      if (a.canQuetLai) {       // phiên hết hiệu lực: chuyển về "chưa kết nối" để trang hiện nút quét QR
+        a.canQuetLai = false;
+        logoutZalo(a);
+      }
+    });
 }
 
 function canRun(a) {

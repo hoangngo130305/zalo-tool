@@ -240,6 +240,9 @@ export async function processOne(api, row, cfg, attachments = []) {
       // Lỗi của riêng số đó, không tính để tự dừng: "User không hợp lệ" (Zalo bị khoá / huỷ),
       // "Không tìm thấy" mã 212 (khách chặn tìm qua SĐT / không có Zalo)
       const ma = e.code ? ` (mã ${e.code})` : "";
+      // Phiên Zalo Web mất hiệu lực (mã 600, thường do đăng nhập Zalo Web / PC nơi khác): lỗi của tài khoản gửi,
+      // không phải của khách -> worker dừng ngay, không ghi kết quả cho khách này
+      if (phienHetHan(e)) return { ...result, phienHetHan: true, ghiChu: `Phiên Zalo hết hiệu lực: ${e.message}${ma}` };
       const rieng = SO_KHONG_HOP_LE.test(e.message) || e.code === 212;
       return { ...result, ketBan: "Lỗi", tinNhan: "Lỗi", ghiChu: `Không tìm thấy Zalo: ${e.message}${ma}`, loiZalo: !rieng };
     }
@@ -303,6 +306,7 @@ async function guiTin(api, row, cfg, attachments, user, result) {
 
 const CHAN_NGUOI_LA = /người lạ/i;
 const SO_KHONG_HOP_LE = /không hợp lệ|invalid user|không tìm thấy|not found/i;
+export const phienHetHan = (e) => e?.code === 600 || /zpw_sek/i.test(String(e?.message || ""));
 
 // ---------- gửi vào 1 nhóm ----------
 // job: { noiDung, attachments } dùng chung cho mọi nhóm trong đợt; nhóm có noiDung riêng thì dùng nội dung riêng
