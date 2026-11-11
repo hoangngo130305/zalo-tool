@@ -308,7 +308,7 @@ class BaoCaoEmail(CoSo):
         super().setUp()
         self.cfg.bao_cao_tan_suat = "hang_ngay"
         self.cfg.bao_cao_email_nhan = "quanly@x.vn, giamdoc@x.vn"
-        self.cfg.gmail_gui = "nguyenkluanbds@gmail.com"
+        self.cfg.gmail_gui = "baocao@test.local"
         self.cfg.gmail_mat_khau = "abcdabcdabcdabcd"
         self.cfg.save()
         LichSuGui.objects.create(sdt="0901111111", ten="Nam", ket_ban="Đã gửi", tin_nhan="Đã gửi",
@@ -410,3 +410,147 @@ class ThoiGianGuiRieng(CoSo):
         t = c.get(f"/admin/guitin/nguoidung/{self.nv.id}/change/").content.decode()
         self.assertIn("tu_cai_thoi_gian", t)
         self.assertIn("Thời gian gửi riêng", t)
+
+
+class SuaTheoTestCaseBoSung(CoSo):
+    """Các lỗi trong tai-lieu/Test-case-bo-sung-Zalo-Tool.xlsx (mã ca ghi ở từng test)."""
+
+    def bao(self, data):
+        return Client().post("/api/worker/event", json.dumps(data), content_type="application/json",
+                             headers={"X-Worker-Token": settings.WORKER_TOKEN})
+
+    def test_NH13_chon_cot_thu_cong_khi_khong_nhan_ra_cot_sdt(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        c = self.client_cua(self.admin)
+        tep = "Liên hệ,Khách\n0901111111,Anh Nam\n0902222222,Chị Lan\n".encode()
+        du_lieu = {"dan": "", "phu_trach": "", "nguon": "Test", "chien_dich": "", "du_an": ""}
+        r = c.post("/admin/guitin/nguoinhan/nhap/", {**du_lieu, "buoc": "xem_truoc",
+                                                     "tep": SimpleUploadedFile("ds.csv", tep, "text/csv")})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.context["thieu_cot"])             # vẫn sang bước xem trước để chọn cột
+        self.assertEqual(r.context["xem_truoc"]["seThem"], 0)
+        r = c.post("/admin/guitin/nguoinhan/nhap/", {**du_lieu, "buoc": "xem_lai", "ma_tam": r.context["ma_tam"],
+                                                     "cot_sdt": "0", "cot_ten": "1"})
+        self.assertEqual(r.context["xem_truoc"]["seThem"], 2)
+        c.post("/admin/guitin/nguoinhan/nhap/", {**du_lieu, "buoc": "nhap", "ma_tam": r.context["ma_tam"],
+                                                 "cot_sdt": "0", "cot_ten": "1"})
+        self.assertEqual(NguoiNhan.objects.get(sdt="0902222222").ten, "Chị Lan")
+
+    @mock.patch("guitin.worker.trang_thai", return_value=DANG_NHAP)
+    def test_NH20_nhan_vien_khong_them_trung_so_cua_minh(self, _tt):
+        c = self.client_cua(self.nv)
+        self.post(c, "/api/contacts", {"contacts": [{"sdt": "0901111111", "ten": "A"}]})
+        rows = c.get("/api/contacts").json()["contacts"]
+        r = self.post(c, "/api/contacts", {"contacts": rows + [{"sdt": "0901111111", "ten": "A lần 2"},
+                                                               {"sdt": "0903333333", "ten": "Mới"}]}).json()
+        self.assertEqual(r["luu"]["trungCuaToi"], ["0901111111"])
+        self.assertEqual(NguoiNhan.objects.filter(phu_trach=self.nv, sdt="0901111111").count(), 1)
+        self.assertTrue(NguoiNhan.objects.filter(phu_trach=self.nv, sdt="0903333333").exists())
+
+    def test_NH22_file_qua_lon_bao_loi_de_hieu(self):
+        from django.test import override_settings
+        with override_settings(DATA_UPLOAD_MAX_MEMORY_SIZE=100):
+            r = self.client_cua(self.nv).post("/api/import", b"x" * 500, content_type="application/octet-stream")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("quá lớn", r.json()["error"])
+
+    @mock.patch("guitin.worker.trang_thai", return_value=DANG_NHAP)
+    def test_ND04_xem_truoc_canh_bao_bien_khong_ton_tai(self, _tt):
+        NguoiDung.objects.filter(id=self.nv.id).update(tin_nhan_mac_dinh="Chào {ten}, mã {abc}. {Chào|Xin chào}")
+        NguoiNhan.objects.create(sdt_goc="0901111111", ten="Nam", phu_trach=self.nv)
+        it = self.post(self.client_cua(self.nv), "/api/preview", {}).json()["items"][0]
+        self.assertTrue(any("{abc}" in x for x in it["canhBao"]), it["canhBao"])
+        self.assertFalse(any("Chào|Xin chào" in x for x in it["canhBao"]))
+
+    def test_CD06_xuat_excel_ten_chien_dich_dac_biet(self):
+        import io
+
+        from openpyxl import load_workbook
+        ids = [ChienDich.objects.create(ten=t).id for t in
+               ("Khách sự kiện 10/2026", "x" * 28 + "AAA", "x" * 28 + "BBB", "a:b?c*[d]")]
+        r = self.client_cua(self.admin).post("/admin/guitin/chiendich/", {"action": "xuat_excel", "_selected_action": ids})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(load_workbook(io.BytesIO(r.content)).sheetnames), 4)
+
+    def test_CD07_xoa_chien_dich_khong_de_trung_o_chung(self):
+        cd = ChienDich.objects.create(ten="A")
+        NguoiNhan.objects.create(sdt_goc="0901111111", phu_trach=self.nv)
+        NguoiNhan.objects.create(sdt_goc="0901111111", phu_trach=self.nv, chien_dich=cd)
+        NguoiNhan.objects.create(sdt_goc="0902222222", phu_trach=self.nv, chien_dich=cd)
+        cd.delete()
+        self.assertEqual(NguoiNhan.objects.filter(sdt="0901111111").count(), 1)
+        self.assertTrue(NguoiNhan.objects.filter(sdt="0902222222", chien_dich__isnull=True).exists())
+
+    def test_CS13_khach_dong_y_voi_zalo_cua_nhan_vien_khac(self):
+        NguoiNhan.objects.create(sdt_goc="0905000077", ten="X", phu_trach=self.nv)
+        LichSuGui.objects.create(sdt="0905000077", nguoi_gui=self.nv, ket_ban="Đã gửi", tin_nhan="Lỗi",
+                                 thoi_gian=timezone.now(), zalo_uid="u77")
+        KhachHang.objects.create(sdt="0905000077", zalo_uid="u77", nhan_vien=self.nv)
+        r = self.bao({"type": "ket_ban", "zaloUid": "u77", "nguoiDungId": self.nv2.id}).json()
+        self.assertNotIn("guiTin", r)
+        self.assertIsNone(KhachHang.objects.get(sdt="0905000077").dong_y_luc)
+        self.bao({"type": "ket_ban", "zaloUid": "u77", "nguoiDungId": self.nv.id})
+        self.assertIsNotNone(KhachHang.objects.get(sdt="0905000077").dong_y_luc)
+
+    @mock.patch("guitin.worker.trang_thai", return_value=DANG_NHAP)
+    def test_TG06_tin_tu_gui_dung_thoi_gian_rieng(self, _tt):
+        NguoiDung.objects.filter(id=self.nv.id).update(tu_cai_thoi_gian=True, cho_toi_thieu_giay=300, cho_toi_da_giay=400)
+        NguoiNhan.objects.create(sdt_goc="0905000077", ten="X", phu_trach=self.nv)
+        LichSuGui.objects.create(sdt="0905000077", nguoi_gui=self.nv, ket_ban="Đã gửi", tin_nhan="Lỗi",
+                                 thoi_gian=timezone.now(), noi_dung="Chào X")
+        KhachHang.objects.create(sdt="0905000077", zalo_uid="u77", nhan_vien=self.nv)
+        self.cfg.noi_dung_tin_nhan = "Chào {ten}"
+        self.cfg.save()
+        r = self.bao({"type": "ket_ban", "zaloUid": "u77", "nguoiDungId": self.nv.id}).json()
+        self.assertEqual(r["guiTin"]["cfg"]["choToiThieuGiay"], 300)
+
+    @mock.patch("guitin.worker.trang_thai", return_value=DANG_NHAP)
+    def test_GN06_chon_qua_100_nhom_bao_ro(self, _tt):
+        nhom = [{"id": str(i), "ten": f"N{i}"} for i in range(1, 121)]
+        r = self.post(self.client_cua(self.nv), "/api/nhom/cau-hinh", {"nhom": nhom})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("tối đa 100", r.json()["error"])
+
+    def test_HG05_xoa_bo_nhom_thi_tat_lich_hen(self):
+        bo = BoNhom.objects.create(nguoi=self.nv, ten="B1", nhom=[{"id": "111", "ten": "N"}])
+        lh = LichHen.objects.create(nguoi=self.nv, loai=LichHen.NHOM, lap=LichHen.HANG_NGAY, gio=time(9, 0), bo_nhom=bo)
+        bo.delete()
+        lh.refresh_from_db()
+        self.assertFalse(lh.dang_bat)
+        self.assertIn("bị xoá", lh.ket_qua_cuoi)
+
+    def test_FB05_gmail_mac_dinh_trong(self):
+        from .models import CaiDat
+        self.assertEqual(CaiDat().gmail_gui, "")
+
+    def test_FB02_gui_lai_dem_ca_so_chien_dich(self):
+        cd = ChienDich.objects.create(ten="A")
+        ids = [NguoiNhan.objects.create(sdt_goc=f"090111111{i}", phu_trach=self.nv, chien_dich=cd).id for i in range(3)]
+        r = self.client_cua(self.admin).post("/admin/guitin/nguoinhan/", {"action": "gui_lai", "_selected_action": ids},
+                                             follow=True)
+        self.assertIn("Đã đánh dấu 3 số", " ".join(str(m) for m in r.context["messages"]))
+
+    def test_FB03_dat_lai_ket_qua_thong_bao_dung(self):
+        from .models import NhatKy
+        KetQua.objects.create(sdt="0901111111", ket_ban="Đã gửi", tin_nhan="Đã gửi", thoi_gian=timezone.now())
+        LichSuGui.objects.create(sdt="0901111111", ket_ban="Đã gửi", tin_nhan="Đã gửi", thoi_gian=timezone.now())
+        with mock.patch("guitin.worker.trang_thai", return_value=DANG_NHAP):
+            self.assertEqual(self.post(self.client_cua(self.admin), "/api/reset", {}).status_code, 200)
+        self.assertFalse(KetQua.objects.exists())
+        self.assertTrue(LichSuGui.objects.exists())
+        self.assertTrue(NhatKy.objects.filter(noi_dung__contains="lịch sử gửi vẫn giữ").exists())
+
+    def test_FB01_khoa_dang_nhap_theo_ip_that_sau_nginx(self):
+        def dn(ip, mk):
+            return Client().post("/dang-nhap/", {"username": "nv2@x.vn", "password": mk},
+                                 REMOTE_ADDR="127.0.0.1", HTTP_X_REAL_IP=ip)
+        for _ in range(5):
+            dn("1.1.1.1", "sai")                                        # máy A gõ sai email của NV2
+        self.assertEqual(dn("1.1.1.1", "matkhau1").status_code, 200)    # máy A bị khoá
+        self.assertEqual(dn("2.2.2.2", "matkhau1").status_code, 302)    # NV2 ở máy khác vẫn vào được
+
+    @mock.patch("guitin.worker.trang_thai", return_value=DANG_NHAP)
+    def test_VH08_nen_json(self, _tt):
+        r = self.client_cua(self.nv).get("/api/state", HTTP_ACCEPT_ENCODING="gzip")
+        self.assertEqual(r.get("Content-Encoding"), "gzip")
+        self.assertIsNone(self.client_cua(self.nv).get("/", HTTP_ACCEPT_ENCODING="gzip").get("Content-Encoding"))

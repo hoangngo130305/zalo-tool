@@ -198,8 +198,14 @@ def ghi_ket_qua_nhom(b):
 
 # ---------- khách đồng ý kết bạn / trả lời ----------
 def _khach_cua(zalo_uid, nguoi):
-    kh = KhachHang.objects.filter(zalo_uid=zalo_uid)
-    return (kh.filter(nhan_vien=nguoi).first() if nguoi else None) or kh.first()
+    """Khách mà chính Zalo của `nguoi` đã mời / nhắn. Khách của nhân viên khác kết bạn hoặc nhắn với Zalo này
+    thì không tính (không ghi nhận, không tự gửi tin từ Zalo này)."""
+    if not nguoi:
+        return None
+    for kh in KhachHang.objects.filter(zalo_uid=zalo_uid):
+        if kh.nhan_vien_id == nguoi.id or LichSuGui.objects.filter(sdt=kh.sdt, nguoi_gui=nguoi).exists():
+            return kh
+    return None
 
 
 def khach_dong_y(b):

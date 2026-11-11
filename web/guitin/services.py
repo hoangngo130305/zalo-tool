@@ -150,6 +150,25 @@ def khoa_cot(s):
     return "".join(ch for ch in s if unicodedata.category(ch) != "Mn" and ch.isalnum())
 
 
+def ten_sheet(ten, da_dung, mac_dinh="Sheet"):
+    r"""Tên sheet Excel hợp lệ: bỏ ký tự cấm / \ ? * [ ] :, tối đa 31 ký tự, không trùng (không phân biệt hoa thường)."""
+    import re
+    goc = re.sub(r"[\\/?*\[\]:]", "-", str(ten or "")).strip("' ")[:31] or mac_dinh
+    t, i = goc, 2
+    while t.lower() in da_dung:
+        hau = f" ({i})"
+        t, i = goc[:31 - len(hau)] + hau, i + 1
+    da_dung.add(t.lower())
+    return t
+
+
+def bien_chua_thay(text):
+    """Biến {abc} còn lại sau khi đã điền (biến không tồn tại / cột không có trong file) – sẽ bị gửi nguyên chữ.
+    Không tính cú pháp xáo {a|b}."""
+    import re
+    return sorted(set(re.findall(r"\{(\w+)\}", text or "")))
+
+
 def canh_bao_noi_dung(text, loai="tin_nhan", tu_spam=None):
     """Cảnh báo (không chặn) khi tin quá dài hoặc có cụm từ dễ bị coi là spam. Giống canhBao() ở chung.js."""
     import re
@@ -377,7 +396,13 @@ def luu_danh_sach(user, rows):
     cua_nguoi_khac = set(NguoiNhan.objects.filter(sdt__in=moi_sdt).exclude(phu_trach=user)
                          .values_list("sdt", "chien_dich_id"))
     tu_choi_set = set(KhongLienHe.objects.filter(sdt__in=moi_sdt).values_list("sdt", flat=True))
-    giu, sua, moi, trung_khac, tu_choi = set(), [], [], [], []
+    giu, sua, moi, trung_khac, tu_choi, trung_cua_toi = set(), [], [], [], [], []
+    # Số đã có trong danh sách của chính mình (cùng chiến dịch): dòng mới trùng thì bỏ, không thêm 2 lần
+    da_co_cua_toi = set()
+    for r in rows:
+        cu = cua_toi.get(_id(r))
+        if cu:
+            da_co_cua_toi.add((cu.sdt, cu.chien_dich_id) if cu.quan_tri_giao else (chuan_hoa_sdt(r.get("sdt")), cd_cua(r)))
     for r in rows:
         d = {"sdt_goc": str(r.get("sdt") or "").strip()[:32], "ten": str(r.get("ten") or "").strip()[:255],
              "noi_dung": str(r.get("noiDung") or "").strip()[:5000], "du_an": str(r.get("duAn") or "").strip()[:100],
@@ -396,7 +421,11 @@ def luu_danh_sach(user, rows):
             trung_khac.append(d["sdt"])
         elif d["sdt"] in tu_choi_set:
             tu_choi.append(d["sdt"])
+        elif d["sdt"] and (d["sdt"], d["chien_dich_id"]) in da_co_cua_toi:
+            trung_cua_toi.append(d["sdt"])
         else:
+            if d["sdt"]:
+                da_co_cua_toi.add((d["sdt"], d["chien_dich_id"]))
             them = r.get("them") if isinstance(r.get("them"), dict) else {}
             moi.append(NguoiNhan(phu_trach=user, thu_tu=base + len(moi) + 1,
                                  them={str(k)[:50]: str(v)[:500] for k, v in list(them.items())[:30]}, **d))
@@ -409,7 +438,8 @@ def luu_danh_sach(user, rows):
         ds = ", ".join(r.sdt_goc or "(trống)" for r in xoa[:20]) + ("…" if len(xoa) > 20 else "")
         ghi_log(f"{user} đã xoá {len(xoa)} số khỏi danh sách của mình: {ds}.", "warn", user)
     tang_phien_ban([user.id])
-    return {"trungNguoiKhac": trung_khac, "tuChoi": tu_choi, "giuLai": len(bo) - len(xoa), "daXoa": len(xoa)}
+    return {"trungNguoiKhac": trung_khac, "tuChoi": tu_choi, "trungCuaToi": trung_cua_toi,
+            "giuLai": len(bo) - len(xoa), "daXoa": len(xoa)}
 
 
 @transaction.atomic
@@ -563,6 +593,10 @@ def phan_tich_file(data):
     return {"rows": rows, "dong_tieu_de": hi, "tieu_de": [str(h) for h in rows[hi]], "ghep": ghep}
 
 
+class ThieuCotSdt(ValueError):
+    """File không có cột SĐT tự nhận được: trang nhập cho chọn cột thủ công ở bước xem trước."""
+
+
 def doc_file(data, ghep=None):
     """Đọc file Excel (.xlsx/.xls) hoặc CSV: cột SĐT / Số điện thoại / Phone, Tên / Họ tên / Name,
     và (không bắt buộc) Nội dung, Dự án, Xưng hô. Các cột khác được giữ trong "them" để dùng làm biến {tencot}.
@@ -575,7 +609,7 @@ def doc_file(data, ghep=None):
         pt["ghep"].update(g)
     ghep = pt["ghep"]
     if ghep.get("sdt") is None:
-        raise ValueError("Không thấy cột SĐT. File cần có cột SĐT (hoặc Số điện thoại / Phone) và cột Tên. "
+        raise ThieuCotSdt("Không thấy cột SĐT. File cần có cột SĐT (hoặc Số điện thoại / Phone) và cột Tên. "
                          "Bấm “Tải file mẫu” để xem mẫu, hoặc chọn cột thủ công ở bước xem trước.")
     dung = {v for v in ghep.values() if v is not None}
     cot_them = [(i, khoa_cot(h)) for i, h in enumerate(tieu_de) if i not in dung and khoa_cot(h)]

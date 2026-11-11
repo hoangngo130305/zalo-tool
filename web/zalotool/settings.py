@@ -57,6 +57,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "guitin.middleware.NenJsonMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     # Không dùng LocaleMiddleware: luôn tiếng Việt (LANGUAGE_CODE), không đổi theo ngôn ngữ trình duyệt

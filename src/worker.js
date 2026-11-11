@@ -94,6 +94,28 @@ const saveQueue = () => {
   fs.writeFileSync(tmp, queue.map((q) => JSON.stringify(q)).join("\n") + (queue.length ? "\n" : ""));
   fs.renameSync(tmp, QUEUE_FILE);
 };
+// Tin tự gửi khi khách đồng ý kết bạn (chờ khung giờ / chờ lượt) cũng lưu ra đĩa: worker khởi động lại không mất tin
+const DIRECT_FILE = path.join(ROOT, "data", "cho-tu-gui.json");
+const saveDirect = () => {
+  const d = Object.fromEntries([...accounts.entries()].filter(([, a]) => a.direct.length).map(([uid, a]) => [uid, a.direct]));
+  try {
+    fs.mkdirSync(path.dirname(DIRECT_FILE), { recursive: true });
+    fs.writeFileSync(`${DIRECT_FILE}.tmp`, JSON.stringify(d));
+    fs.renameSync(`${DIRECT_FILE}.tmp`, DIRECT_FILE);
+  } catch (e) {
+    console.error(`Không lưu được ${DIRECT_FILE}: ${e.message}`);
+  }
+};
+const loadDirect = () => {
+  try {
+    for (const [uid, ds] of Object.entries(JSON.parse(fs.readFileSync(DIRECT_FILE, "utf8")))) {
+      if (Array.isArray(ds) && ds.length) acc(uid).direct = ds;
+    }
+  } catch (e) {
+    if (e.code !== "ENOENT") console.error(`Không đọc được ${DIRECT_FILE}: ${e.message}`);
+  }
+};
+
 // SĐT có kết quả chưa báo được về Django: không gửi lại số này dù Django tưởng là chưa gửi
 const unreported = () => new Set(queue.filter((q) => q.type === "result").map((q) => q.data.sdt));
 let flushing = null;
@@ -155,6 +177,10 @@ async function finishLogin(a, api) {
   }
   log(a, `Đã kết nối Zalo: ${a.account}`, "ok");
   startListener(a);
+  if (a.direct.length) {
+    log(a, `Còn ${a.direct.length} tin tự gửi (khách đồng ý kết bạn) từ lần chạy trước, sẽ gửi tiếp.`);
+    processDirect(a);
+  }
 }
 
 // ---------- nghe sự kiện Zalo: khách đồng ý kết bạn, khách nhắn tin đến ----------
@@ -193,7 +219,10 @@ async function onKhachDongY(a, zaloUid) {
   const res = await reportJson("ket_ban", { zaloUid, nguoiDungId: a.uid }, 3);
   const g = res?.guiTin;
   if (g?.noiDung && g?.sdt) {
+    // Zalo có thể báo đồng ý nhiều lần trước khi tin kịp gửi: mỗi khách chỉ 1 tin trong hàng chờ
+    if (a.direct.some((x) => String(x.sdt) === String(g.sdt) && (x.chienDichId ?? null) === (g.chienDichId ?? null))) return;
     a.direct.push(g);
+    saveDirect();
     log(a, `Khách ${g.sdt} vừa đồng ý kết bạn, sẽ tự gửi tin cho khách.`, "ok");
     processDirect(a);
   }
@@ -210,16 +239,22 @@ async function processDirect(a) {
       const cfg = sanitizeConfig(g.cfg || {});
       for (let k = ngoaiKhungGio(cfg); k.ms > 0; k = ngoaiKhungGio(cfg)) await sleep(Math.min(k.ms, 60_000));
       while (a.current || Date.now() - a.lastSendAt < cfg.choToiThieuGiay * 1000) await sleep(2000);
-      a.direct.shift();
+      if (!a.api) break;
       a.lastSendAt = Date.now();
       let attachments = [];
       try { attachments = loadAttachments(Array.isArray(g.anh) ? g.anh.slice(0, 10) : []); } catch {}
       const row = { sdt: String(g.sdt), ten: String(g.ten ?? ""), noiDung: String(g.noiDung).slice(0, 5000),
         zaloUid: String(g.zaloUid ?? ""), kieu: "khi_dong_y" };
-      const { loiZalo, ...res } = await processOne(a.api, row, cfg, attachments);
+      const { loiZalo, phienHetHan, ...res } = await processOne(a.api, row, cfg, attachments);
       a.lastSendAt = Date.now();
+      if (phienHetHan) {        // phiên Zalo hết hiệu lực: giữ tin trong hàng, gửi lại sau khi quét QR
+        log(a, `Phiên Zalo ${a.account} đã hết hiệu lực, tin tự gửi cho ${row.sdt} sẽ gửi lại sau khi kết nối lại.`, "error");
+        break;
+      }
       await reportDurable("result", { sdt: row.sdt, ketQua: { ...res, taiKhoanZalo: a.account }, nguoiGuiId: a.uid,
         kieu: "khi_dong_y", chienDichId: g.chienDichId ?? null });
+      a.direct.shift();
+      saveDirect();
       log(a, `${row.sdt}: tự gửi tin khi khách đồng ý kết bạn: ${res.tinNhan}${res.ghiChu ? ` (${res.ghiChu})` : ""}`,
         res.tinNhan === "Lỗi" ? "error" : "ok");
     }
@@ -273,10 +308,15 @@ function cancelLogin(a) {
   Object.assign(a, { login: "out", qr: null, qrActions: null });
 }
 
-function logoutZalo(a) {
+// giuTinCho: phiên hết hiệu lực (sẽ quét QR lại cùng tài khoản) thì giữ tin tự gửi đang chờ
+function logoutZalo(a, giuTinCho = false) {
   if (a.running) throw new Error("Đang gửi, hãy bấm Dừng trước khi ngắt kết nối Zalo");
   try { a.api?.listener?.stop?.(); } catch {}
-  Object.assign(a, { api: null, account: null, login: "out", listening: false, direct: [] });
+  Object.assign(a, { api: null, account: null, login: "out", listening: false });
+  if (!giuTinCho) {
+    a.direct = [];
+    saveDirect();
+  }
   clearZaloSession(a.uid);
 }
 
@@ -361,7 +401,7 @@ function launch(a, { kind, items, cfg, runBy, task, label, keyOf, onResult, dotI
       });
       if (a.canQuetLai) {       // phiên hết hiệu lực: chuyển về "chưa kết nối" để trang hiện nút quét QR
         a.canQuetLai = false;
-        logoutZalo(a);
+        logoutZalo(a, true);
       }
     });
 }
@@ -519,6 +559,7 @@ http.createServer(async (req, res) => {
     console.log(`Còn ${queue.length} kết quả chưa báo về web từ lần chạy trước, đang gửi lại...`);
     flushQueue(3);
   }
+  loadDirect();
   // Tự kết nối lại các tài khoản đã lưu phiên Zalo
   for (const uid of savedSessionIds()) startLogin(acc(uid), { auto: true });
 });

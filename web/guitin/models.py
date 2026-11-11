@@ -494,7 +494,7 @@ class CaiDat(models.Model):
     bao_cao_email_nhan = models.TextField(
         "Email nhận báo cáo", blank=True,
         help_text="Mỗi dòng (hoặc cách nhau bằng dấu phẩy) một email quản lý nhận file Excel báo cáo.")
-    gmail_gui = models.EmailField("Gmail gửi báo cáo", blank=True, default="nguyenkluanbds@gmail.com",
+    gmail_gui = models.EmailField("Gmail gửi báo cáo", blank=True,
                                   help_text="Tài khoản Gmail dùng để gửi email báo cáo.")
     gmail_mat_khau = models.CharField(
         "Mật khẩu ứng dụng của Gmail", max_length=64, blank=True,

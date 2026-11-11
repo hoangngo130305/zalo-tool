@@ -9,7 +9,7 @@ from django.conf import settings
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, RequestDataTooBig
 from django.http import HttpResponse, JsonResponse
 from django.db import transaction
 from django.shortcuts import redirect, render
@@ -86,6 +86,9 @@ def api(quyen="view", methods=("GET", "POST")):
                     request.json = {}
                 out = fn(request, *args, **kwargs)
                 return out if isinstance(out, HttpResponse) else JsonResponse(out)
+            except RequestDataTooBig:
+                return JsonResponse({"error": "File / dữ liệu quá lớn (tối đa 10 MB). Chia file thành nhiều phần "
+                                              "hoặc xoá bớt cột không cần rồi nhập lại."}, status=400)
             except (ValueError, worker.WorkerLoi) as e:
                 return JsonResponse({"error": str(e)}, status=400)
         return wrapper
@@ -391,10 +394,12 @@ def api_preview(request):
     out = []
     for r in items:
         loi_moi, tin = sv.dien(sv.loi_moi_gui(r, cfg), r.ten), sv.noi_dung_gui(r, cfg)
+        bien = sv.bien_chua_thay((tin if cfg.gui_tin_nhan else "") + " " + (loi_moi if cfg.gui_ket_ban else ""))
         out.append({
             "sdt": r.sdt, "ten": r.ten, "chienDich": r.chien_dich.ten if r.chien_dich_id else "",
             "canhBao": (sv.canh_bao_noi_dung(tin, "tin_nhan", cfg.cac_tu_spam()) if cfg.gui_tin_nhan else [])
-            + (sv.canh_bao_noi_dung(loi_moi, "loi_moi", cfg.cac_tu_spam()) if cfg.gui_ket_ban else []),
+            + (sv.canh_bao_noi_dung(loi_moi, "loi_moi", cfg.cac_tu_spam()) if cfg.gui_ket_ban else [])
+            + ([f"còn biến chưa có dữ liệu: {', '.join('{' + b + '}' for b in bien)} – sẽ gửi nguyên chữ"] if bien else []),
             "loiMoi": sv.xao(loi_moi) if cfg.gui_ket_ban else None, "soMauLoiMoi": len(sv.cac_mau(loi_moi)),
             "tenGoiNho": sv.ten_goi_nho(cfg.mau_ten_goi_nho, r.ten, r.sdt, sv.du_an_cua(r, cfg)) if cfg.doi_ten_goi_nho else None,
             "tinNhan": sv.xao(tin) if cfg.gui_tin_nhan else None, "soMauTinNhan": len(sv.cac_mau(tin)),
@@ -405,15 +410,16 @@ def api_preview(request):
 
 @api("send", ["POST"])
 def api_reset(request):
-    """Gửi lại 1 số (nhân viên chỉ với số của mình), hoặc xoá toàn bộ lịch sử (chỉ quản trị)."""
+    """Gửi lại 1 số (nhân viên chỉ với số của mình), hoặc đặt lại kết quả mọi số “Chung” (chỉ quản trị).
+    Lịch sử gửi luôn được giữ (dùng cho hạn mức ngày, quy tắc không nhắn lại trong N ngày, báo cáo)."""
     can_khong_dang_gui(request.user)
     u = request.user
     sdt = request.json.get("sdt")
     if not sdt:
         if not u.co_quyen("settings"):
-            raise ValueError("Chỉ quản trị viên được xoá toàn bộ lịch sử gửi")
-        KetQua.objects.all().delete()
-        sv.ghi_log(f"{u} đã xoá toàn bộ lịch sử gửi.", "warn", u)
+            raise ValueError("Chỉ quản trị viên được đặt lại kết quả gửi của tất cả các số")
+        n, _ = KetQua.objects.all().delete()
+        sv.ghi_log(f"{u} đã đặt lại kết quả gửi của {n} số “Chung” để gửi lại (lịch sử gửi vẫn giữ).", "warn", u)
     else:
         phone = chuan_hoa_sdt(sdt)
         if not u.co_quyen("all") and not u.nguoi_nhan.filter(sdt=phone).exists():
@@ -626,7 +632,9 @@ def api_worker_event(request):
         # Khách đồng ý kết bạn: trả lời worker có cần tự gửi tin cho khách không
         out = cs.khach_dong_y(b)
         if out.get("guiTin"):
-            out["guiTin"]["cfg"] = CaiDat.lay().to_dict()
+            # Thời gian chờ theo người có Zalo (thời gian riêng nếu được cấp quyền), giống đợt gửi thường
+            nguoi = NguoiDung.objects.filter(id=b.get("nguoiDungId")).first()
+            out["guiTin"]["cfg"] = sv.cau_hinh_cua(nguoi) if nguoi else CaiDat.lay().to_dict()
         return JsonResponse({"ok": True, **out})
     elif b.get("type") == "tra_loi":
         cs.khach_tra_loi(b)
@@ -663,9 +671,12 @@ def _nhom_hop_le(nhom):
     """Danh sách nhóm từ trang web: [{id, ten, noiDung (nội dung riêng của nhóm, không bắt buộc)}]."""
     if not isinstance(nhom, list):
         raise ValueError("Dữ liệu nhóm không hợp lệ")
-    return [{"id": str(g.get("id")), "ten": str(g.get("ten") or "")[:255],
-             **({"noiDung": str(g["noiDung"]).strip()[:5000]} if str(g.get("noiDung") or "").strip() else {})}
-            for g in nhom if isinstance(g, dict) and str(g.get("id") or "").isdigit()][:100]
+    out = [{"id": str(g.get("id")), "ten": str(g.get("ten") or "")[:255],
+            **({"noiDung": str(g["noiDung"]).strip()[:5000]} if str(g.get("noiDung") or "").strip() else {})}
+           for g in nhom if isinstance(g, dict) and str(g.get("id") or "").isdigit()]
+    if len(out) > 100:      # báo rõ thay vì lặng lẽ bỏ bớt
+        raise ValueError(f"Chọn tối đa 100 nhóm mỗi lần (đang chọn {len(out)}). Bỏ bớt nhóm hoặc chia thành nhiều bộ nhóm.")
+    return out
 
 
 @api("send", ["POST"])

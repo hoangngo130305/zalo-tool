@@ -12,7 +12,15 @@ KHOA_GIAY = 5 * 60
 
 
 def ip_cua(request):
-    return (request.META.get("REMOTE_ADDR") or "?") if request else "?"
+    """IP của người dùng. Trên server, nginx (cổng 8091) chuyển tiếp từ 127.0.0.1 nên REMOTE_ADDR luôn là 127.0.0.1:
+    khi đó lấy IP thật nginx gắn vào X-Real-IP (chỉ tin header này khi request đến từ proxy nội bộ)."""
+    if not request:
+        return "?"
+    ip = request.META.get("REMOTE_ADDR") or "?"
+    if ip in ("127.0.0.1", "::1"):
+        that = request.META.get("HTTP_X_REAL_IP") or (request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[-1]
+        ip = that.strip() or ip
+    return ip
 
 
 def _khoa(request, email):

@@ -16,6 +16,7 @@
       <div class="card-body">
         {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors|join:" " }}</div>{% endif %}
 
+        {% if thieu_cot %}<div class="alert alert-warning">Tool không tự nhận ra cột SĐT. Chọn cột SĐT (và Họ tên…) ở bảng “Chọn cột” bên dưới rồi bấm <b>Xem lại theo cột đã chọn</b>.</div>{% endif %}
         {% if xem_truoc %}
         <!-- Bước 2: xem trước, chọn cột, rồi mới nhập -->
         <input type="hidden" name="ma_tam" value="{{ ma_tam }}">

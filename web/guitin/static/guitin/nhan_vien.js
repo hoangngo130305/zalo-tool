@@ -215,6 +215,11 @@ const saveContacts = debounce(async () => {
       if (tuChoi.length) showError(new Error(`Không thêm ${tuChoi.length} số khách đã từ chối liên hệ: ${tuChoi.slice(0, 5).join(", ")}${tuChoi.length > 5 ? "…" : ""}`));
     } else refreshStatuses();
     if (giuLai) { info(`Giữ lại ${giuLai} số quản trị giao (nhân viên không xoá được).`, "warn"); reloadContacts(); }
+    const trungCuaToi = r.luu?.trungCuaToi || [];
+    if (trungCuaToi.length) {     // số đã có sẵn trong danh sách của mình: server không thêm lần 2
+      info(`Bỏ qua ${trungCuaToi.length} số đã có trong danh sách của bạn: ${trungCuaToi.slice(0, 5).join(", ")}${trungCuaToi.length > 5 ? "…" : ""}`, "warn");
+      reloadContacts();
+    }
     flash("listSaved", "Đã lưu");
   } catch (e) { showError(e); }
 }, 600);
@@ -371,6 +376,7 @@ $("fileInput").onchange = async () => {
   $("fileInput").value = "";
   if (!f) return;
   try {
+    if (f.size > 10 * 1024 * 1024) throw new Error(`File “${f.name}” nặng ${(f.size / 1048576).toFixed(1)} MB, tối đa 10 MB. Chia file thành nhiều phần hoặc xoá bớt cột không cần rồi nhập lại.`);
     const r = await api("/api/import", await f.arrayBuffer(), { raw: true });
     if (!r.rows.length) throw new Error("Không đọc được dòng nào. File cần có cột SĐT, Họ tên và (không bắt buộc) Nội dung. Bấm “Tải file mẫu” để xem mẫu.");
     addMany(r.rows);
@@ -719,6 +725,7 @@ $("btnPreview").onclick = async () => {
     $("pvTitle").textContent = `Xem trước đợt gửi (${items.length} người)`;
     $("pvList").innerHTML = items.map((it, i) => `<div class="pv-item">
       <h3>${i + 1}. ${esc(it.sdt)} · ${esc(it.ten || "không tên")}</h3>
+      ${(it.canhBao || []).length ? `<div class="warn-box">${it.canhBao.map((c) => `⚠ ${esc(c)}`).join("<br>")}</div>` : ""}
       ${it.loiMoi !== null ? `<div class="preview"><span class="lbl">Lời mời kết bạn${it.soMauLoiMoi > 1 ? ` (ngẫu nhiên 1 trong ${it.soMauLoiMoi} mẫu)` : ""}</span>${esc(it.loiMoi)}</div>` : ""}
       ${it.tenGoiNho ? `<div class="preview"><span class="lbl">Đổi tên gợi nhớ thành</span>${esc(it.tenGoiNho)}</div>` : ""}
       ${it.tinNhan !== null ? `<div class="preview"><span class="lbl">Tin nhắn${it.soMauTinNhan > 1 ? ` (ngẫu nhiên 1 trong ${it.soMauTinNhan} mẫu)` : ""}${it.soAnh ? `, kèm ${it.soAnh} ảnh` : ""}</span>${esc(it.tinNhan)}</div>` : ""}

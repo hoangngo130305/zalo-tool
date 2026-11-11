@@ -19,6 +19,7 @@ data/anh-gui-nhom/
 data/anh-tin-nhan/
 # Kết quả gửi chưa báo được về web (worker tự gửi lại)
 data/cho-bao-cao.jsonl*
+data/cho-tu-gui.json*
 # Tool tự tạo khi chạy
 data/chay-lich.txt
 data/tam-nhap/
@@ -28,3 +29,7 @@ tai-lieu/palm city.xls
 tai-lieu/Spam tesst.xlsx
 tai-lieu/Test-case-Zalo-Tool.xlsx
 ~$*
+# test đầu-cuối: thư mục chạy và database tạm
+tests/e2e/wk/
+tests/e2e/*.sqlite3
+tests/e2e/*.log

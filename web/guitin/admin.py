@@ -264,9 +264,15 @@ class NguoiNhanAdmin(admin.ModelAdmin):
                     (tam / f"{ma}.json").write_text(json.dumps(du_lieu), encoding="utf-8")
                 data = bytes.fromhex(du_lieu["tep"]) if du_lieu["tep"] else b""
                 ghep = {k: request.POST.get(f"cot_{k}") for k, _ in sv.COT_NHAP if f"cot_{k}" in request.POST}
-                rows = sv.doc_file(data, ghep or None) if data else []
+                thieu_cot = None
+                try:
+                    rows = sv.doc_file(data, ghep or None) if data else []
+                except sv.ThieuCotSdt as e:
+                    if request.POST.get("buoc") == "nhap":
+                        raise
+                    rows, thieu_cot = [], str(e)     # vẫn sang bước xem trước để chọn cột SĐT thủ công
                 rows += sv.doc_van_ban(du_lieu["dan"])
-                if not rows:
+                if not rows and not thieu_cot:
                     raise ValueError("Không đọc được số nào. Kiểm tra lại file hoặc nội dung đã dán.")
                 cd = form.cleaned_data["chien_dich"]
                 if request.POST.get("buoc") != "nhap":
@@ -274,7 +280,7 @@ class NguoiNhanAdmin(admin.ModelAdmin):
                     if pt and ghep:
                         pt["ghep"].update({k: int(v) for k, v in ghep.items() if v not in (None, "")})
                         pt["ghep"].update({k: None for k, v in ghep.items() if v in (None, "")})
-                    ctx.update(xem_truoc=sv.xem_truoc_nhap(rows, cd), ma_tam=ma, mau=rows[:5],
+                    ctx.update(xem_truoc=sv.xem_truoc_nhap(rows, cd), ma_tam=ma, mau=rows[:5], thieu_cot=thieu_cot,
                                tieu_de=pt["tieu_de"] if pt else None,
                                ghep=[(k, ten, pt["ghep"].get(k)) for k, ten in sv.COT_NHAP] if pt else None)
                     return TemplateResponse(request, "admin/guitin/nguoinhan/nhap.html", ctx)
@@ -333,8 +339,10 @@ class NguoiNhanAdmin(admin.ModelAdmin):
     @admin.action(description="Gửi lại các số đã chọn (xoá kết quả cũ)", permissions=["change"])
     def gui_lai(self, request, qs):
         from django.utils import timezone
-        qs.filter(chien_dich__isnull=False).update(gui_lai_tu=timezone.now())
-        n, _ = KetQua.objects.filter(sdt__in=qs.filter(chien_dich__isnull=True).exclude(sdt__isnull=True).values("sdt")).delete()
+        # Số trong chiến dịch: chỉ tính kết quả sau lúc này; số Chung: xoá kết quả mới nhất
+        n_cd = qs.filter(chien_dich__isnull=False).update(gui_lai_tu=timezone.now())
+        n_chung, _ = KetQua.objects.filter(sdt__in=qs.filter(chien_dich__isnull=True).exclude(sdt__isnull=True).values("sdt")).delete()
+        n = n_cd + n_chung
         sv.tang_phien_ban()
         sv.ghi_log(f"{request.user} đánh dấu {n} số để gửi lại.", "warn", request.user)
         self.message_user(request, f"Đã đánh dấu {n} số để gửi lại ở lần chạy sau.")
@@ -680,8 +688,9 @@ class ChienDichAdmin(admin.ModelAdmin):
         from openpyxl import Workbook
         wb = Workbook()
         wb.remove(wb.active)
+        da_dung = set()
         for cd in qs:
-            ws = wb.create_sheet(cd.ten[:28] or f"CD{cd.id}")
+            ws = wb.create_sheet(sv.ten_sheet(cd.ten, da_dung, f"CD{cd.id}"))
             ws.append(["SĐT", "Họ tên", "Nhân viên", "Gửi lúc", "Kết bạn", "Tin nhắn", "Đồng ý kết bạn", "Trả lời", "Trạng thái khách"])
             kh = {k.sdt: k for k in KhachHang.objects.filter(sdt__in=cd.nguoi_nhan.values("sdt"))}
             gui = {}
